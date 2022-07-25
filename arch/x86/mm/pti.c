@@ -162,6 +162,8 @@ pgd_t __pti_set_user_pgtbl(pgd_t *pgdp, pgd_t pgd)
 	return pgd;
 }
 
+EXPORT_SYMBOL(__pti_set_user_pgtbl);
+
 /*
  * Walk the user copy of the page tables (optionally) trying to allocate
  * page table pages on the way down.

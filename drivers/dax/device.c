@@ -479,6 +479,58 @@ static struct dax_device_driver device_dax_driver = {
 	.match_always = 1,
 };
 
+/**
+ * device_dax_driver_find_device_by_devt() - Find a particular devdax device
+ * with a matching devt.
+ * @devt: devt to match
+ *
+ * Return: pointer to device
+ */
+struct device *device_dax_driver_find_device_by_devt(dev_t devt)
+{
+	return driver_find_device_by_devt(&device_dax_driver.drv, devt);
+}
+EXPORT_SYMBOL(device_dax_driver_find_device_by_devt);
+
+/**
+ * device_dax_find_address_range_by_devt() - Get the start address and size of a
+ * particular devdax device with a matching devt.
+ * @devt: devt to match
+ * @size: optional out parameter for address range length
+ *
+ * Return: pointer to start address of matched device, else NULL
+ */
+void *device_dax_find_address_range_by_devt(dev_t devt, u64 *size)
+{
+	struct device *dev;
+	struct dev_dax *dev_dax;
+	struct dev_dax_range *range;
+
+	dev = device_dax_driver_find_device_by_devt(devt);
+	if (!dev)
+		return NULL;
+
+	dev_dax = to_dev_dax(dev);
+	if (dev_dax->nr_range == 0) {
+		dev_err(dev, "Device has no ranges!\n");
+		return NULL;
+	} else if (dev_dax->nr_range != 1) {
+		dev_alert(dev, "Device has %d ranges. Only returning first range.\n",
+			dev_dax->nr_range);
+	}
+
+	range = &dev_dax->ranges[0];
+	if (range->pgoff) {
+		dev_err(dev, "Range has page offset %lu.\n", range->pgoff);
+		return NULL;
+	}
+
+	if (size)
+		*size = range_len(&range->range);
+	return __va(range->range.start);
+}
+EXPORT_SYMBOL(device_dax_find_address_range_by_devt);
+
 static int __init dax_init(void)
 {
 	return dax_driver_register(&device_dax_driver);

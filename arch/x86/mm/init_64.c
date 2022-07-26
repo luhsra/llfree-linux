@@ -60,6 +60,8 @@
 
 #include "ident_map.c"
 
+#include <llfree_alloc.h>
+
 #define DEFINE_POPULATE(fname, type1, type2, init)		\
 static inline void fname##_init(struct mm_struct *mm,		\
 		type1##_t *arg1, type2##_t *arg2, bool init)	\
@@ -1328,14 +1330,54 @@ failed:
 	panic("Failed to pre-allocate %s pages for vmalloc area\n", lvl);
 }
 
+#ifdef CONFIG_LLFREE
+
+void __init mem_init_llfree(void)
+{
+	struct zone *zone;
+
+	for_each_populated_zone(zone) {
+		llfree_t *llfree;
+
+		pr_info("llfree: init on %u cpus", num_possible_cpus());
+		llfree = llfree_node_init(zone->node, num_possible_cpus(), false,
+				       pfn_to_kaddr(zone->zone_start_pfn),
+				       zone->spanned_pages);
+		if (llfree == NULL) {
+			pr_err("llfree: init failure");
+			BUG();
+		}
+
+		zone->llfree = llfree;
+	}
+}
+
+#endif
+
 void __init mem_init(void)
 {
 	pci_iommu_alloc();
 
 	/* clear_bss() already clear the empty_zero_page */
 
+#ifdef CONFIG_LLFREE
+	mem_init_llfree();
+#endif
+
 	/* this will put all memory onto the freelists */
 	memblock_free_all();
+#ifdef CONFIG_LLFREE
+	{
+		struct zone *zone;
+		int zid = 0;
+		for_each_zone(zone) {
+			u64 num_pages = llfree_free_frames(zone->llfree);
+			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
+			zid += 1;
+		}
+	};
+#endif
+
 	after_bootmem = 1;
 	x86_init.hyper.init_after_bootmem();
 

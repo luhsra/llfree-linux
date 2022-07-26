@@ -267,4 +267,9 @@ static inline void hmem_register_device(int target_nid, struct resource *r)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_DEV_DAX)
+struct device *device_dax_driver_find_device_by_devt(dev_t devt);
+void *device_dax_find_address_range_by_devt(dev_t devt, u64 *size);
+#endif /* CONFIG_DEV_DAX */
+
 #endif

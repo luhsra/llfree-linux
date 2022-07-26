@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "LLFree Page Allocator"
+
+config LLFREE
+	bool "LLFree Allocator"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  A new experimental allocator for volatile and persistent memory.
+
+config LLFREE_SIZE_COUNTERS
+	bool "Size counters"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  Debug counters for page allocations.
+
+config LLFREE_FAST_FREE
+	bool "Fast frees"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  Skip struct page checks for higher order frees. This might break memory hotplugging.
+
+endmenu

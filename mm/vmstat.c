@@ -343,7 +343,7 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 			   long delta)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	long x;
 	long t;
 
@@ -359,6 +359,14 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 	x = delta + __this_cpu_read(*p);
 
 	t = __this_cpu_read(pcp->stat_threshold);
+#ifdef CONFIG_LLFREE
+	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
+	    item == NR_FREE_PAGES) {
+		// Resolving hugepage allocation bottleneck!
+		t += 1024;
+	}
+#endif
+
 
 	if (unlikely(abs(x) > t)) {
 		zone_page_state_add(x, zone, item);
@@ -432,7 +440,7 @@ EXPORT_SYMBOL(__mod_node_page_state);
 void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	s8 v, t;
 
 	/* See __mod_node_page_state */
@@ -440,6 +448,13 @@ void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 
 	v = __this_cpu_inc_return(*p);
 	t = __this_cpu_read(pcp->stat_threshold);
+#ifdef CONFIG_LLFREE
+	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
+	    item == NR_FREE_PAGES) {
+		// Resolving hugepage allocation bottleneck!
+		t += 1024;
+	}
+#endif
 	if (unlikely(v > t)) {
 		s8 overstep = t >> 1;
 
@@ -488,7 +503,7 @@ EXPORT_SYMBOL(__inc_node_page_state);
 void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	s8 v, t;
 
 	/* See __mod_node_page_state */
@@ -496,6 +511,13 @@ void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 
 	v = __this_cpu_dec_return(*p);
 	t = __this_cpu_read(pcp->stat_threshold);
+#ifdef CONFIG_LLFREE
+	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
+	    item == NR_FREE_PAGES) {
+		// Resolving hugepage allocation bottleneck!
+		t += 1024;
+	}
+#endif
 	if (unlikely(v < - t)) {
 		s8 overstep = t >> 1;
 
@@ -558,7 +580,7 @@ static inline void mod_zone_state(struct zone *zone,
        enum zone_stat_item item, long delta, int overstep_mode)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	long o, n, t, z;
 
 	do {
@@ -575,6 +597,13 @@ static inline void mod_zone_state(struct zone *zone,
 		 * for all cpus in a zone.
 		 */
 		t = this_cpu_read(pcp->stat_threshold);
+#ifdef CONFIG_LLFREE
+		if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
+		    item == NR_FREE_PAGES) {
+			// Resolving hugepage allocation bottleneck!
+			t += 1024;
+		}
+#endif
 
 		o = this_cpu_read(*p);
 		n = delta + o;
@@ -1064,6 +1093,7 @@ static void fill_contig_page_info(struct zone *zone,
 		 * Access to nr_free is lockless as nr_free is used only for
 		 * diagnostic purposes. Use data_race to avoid KCSAN warning.
 		 */
+		// FIXME: Another access to the allocator free lists...
 		blocks = data_race(zone->free_area[order].nr_free);
 		info->free_blocks_total += blocks;
 

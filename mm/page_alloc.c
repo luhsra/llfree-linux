@@ -264,6 +264,135 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+// Count different allocation sizes
+struct size_counters {
+	u64 c[2 * MAX_ORDER];
+	u64 bulk;
+};
+static DEFINE_PER_CPU(struct size_counters, size_counters);
+// TODO: determine if needed and what allocations are done before!
+static int size_counters_active = false;
+
+static void size_counters_alloc(int order)
+{
+	if (size_counters_active) {
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		sc->c[order] += 1;
+		put_cpu_ptr(sc);
+	}
+}
+static void size_counters_bulk_alloc(u64 inc)
+{
+	if (size_counters_active) {
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		sc->bulk += inc;
+		put_cpu_ptr(sc);
+	}
+}
+static void size_counters_free(int order)
+{
+	if (size_counters_active) {
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		sc->c[MAX_ORDER + order] += 1;
+		put_cpu_ptr(sc);
+	}
+}
+
+#define _check_ret(ret)                                        \
+	({                                                     \
+		int __ret = ret;                               \
+		if (__ret < 0) {                               \
+			pr_err("Error reading size_counters"); \
+			return -ENOMEM;                        \
+		}                                              \
+		__ret;                                         \
+	});
+
+/// Output the size counters in csv format
+static ssize_t size_counters_show(struct kobject *kobj,
+				  struct kobj_attribute *attr, char *buf)
+{
+	char ops[] = { 'a', 'f' };
+	size_t cpu, len = 0;
+
+	// csv header
+	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len, "CPU,op,bulk"));
+	for (size_t order = 0; order < MAX_ORDER && len < PAGE_SIZE; order++) {
+		len += _check_ret(
+			snprintf(buf + len, PAGE_SIZE - len, ",%lu", order));
+	}
+	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len, "\n"));
+
+	// csv body
+	for (size_t o = 0; o < sizeof(ops) / sizeof(*ops); o++) {
+		for_each_possible_cpu(cpu) {
+			struct size_counters *sc =
+				per_cpu_ptr(&size_counters, cpu);
+
+			len += _check_ret(snprintf(buf + len, PAGE_SIZE - len,
+						   "%lu,%c", cpu, ops[o]));
+
+			if (o == 0) {
+				len += _check_ret(snprintf(buf + len,
+							   PAGE_SIZE - len,
+							   ",%llu", sc->bulk));
+			} else {
+				len += _check_ret(snprintf(
+					buf + len, PAGE_SIZE - len, ",0"));
+			}
+
+			for (size_t order = 0;
+			     order < MAX_ORDER && len < PAGE_SIZE; order++) {
+				len += _check_ret(snprintf(
+					buf + len, PAGE_SIZE - len, ",%llu",
+					sc->c[o * MAX_ORDER + order]));
+			}
+
+			len += _check_ret(
+				snprintf(buf + len, PAGE_SIZE - len, "\n"));
+		}
+	}
+
+	if (len < PAGE_SIZE)
+		buf[len] = '\0';
+	return len;
+}
+#undef _check_ret
+
+static struct kobj_attribute size_counters_attr =
+	__ATTR(size_counters, 0444, size_counters_show, NULL);
+static struct attribute *size_counters_attrs[] = {
+	&size_counters_attr.attr,
+	NULL, /* need to NULL terminate the list of attributes */
+};
+static struct attribute_group size_counters_group = {
+	.attrs = size_counters_attrs,
+};
+static struct kobject *size_counters_obj;
+
+static int __init size_counters_init()
+{
+	int retval;
+	pr_info("Initializing size_counters obj");
+
+	size_counters_obj = kobject_create_and_add(KBUILD_MODNAME, kernel_kobj);
+	if (!size_counters_obj) {
+		pr_err("size_counters_obj failed\n");
+		return -ENOMEM;
+	}
+
+	retval = sysfs_create_group(size_counters_obj, &size_counters_group);
+	if (retval) {
+		pr_err("size_counters_obj group failed\n");
+		kobject_put(size_counters_obj);
+	}
+	return 0;
+}
+postcore_initcall(size_counters_init);
+// static void size_counters_finalize() {
+// 	kobject_put(size_counters_obj);
+// }
+
 int percpu_pagelist_high_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 DEFINE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_ALLOC_DEFAULT_ON, init_on_alloc);
@@ -1398,6 +1527,7 @@ static __always_inline bool free_pages_prepare(struct page *page,
 	VM_BUG_ON_PAGE(PageTail(page), page);
 
 	trace_mm_page_free(page, order);
+	size_counters_free(order);
 
 	if (unlikely(PageHWPoison(page)) && !order) {
 		/*
@@ -5487,6 +5617,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	__count_zid_vm_events(PGALLOC, zone_idx(zone), nr_account);
 	zone_statistics(ac.preferred_zoneref->zone, zone, nr_account);
 
+	size_counters_bulk_alloc(nr_populated);
 out:
 	return nr_populated;
 
@@ -5569,6 +5700,7 @@ out:
 	}
 
 	trace_mm_page_alloc(page, order, alloc_gfp, ac.migratetype);
+	size_counters_alloc(order);
 
 	return page;
 }
@@ -8598,6 +8730,9 @@ void __init page_alloc_init(void)
 					page_alloc_cpu_online,
 					page_alloc_cpu_dead);
 	WARN_ON(ret < 0);
+
+	// Activate percpu size counters
+	size_counters_active = true;
 }
 
 /*

@@ -1,0 +1,7 @@
+[build]
+target = "x86_64-linux.json"
+rustflags = ["-Zno-unique-section-names", "-Ccodegen-units=1", "-Crelocation-model=static", "-Zfunction-sections=n", "-Ctarget-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2", "-Ztune-cpu=generic", "-Cno-redzone=y", "-Ccode-model=kernel", "-Ctarget-feature=+retpoline-external-thunk", "-Cdebug-assertions=n", "-Coverflow-checks=y", "-Copt-level=2"]
+
+[unstable]
+build-std-features = ["compiler-builtins-mem"]
+build-std = ["core", "alloc", "compiler_builtins"]

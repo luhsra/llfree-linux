@@ -60,6 +60,8 @@
 
 #include "ident_map.c"
 
+#include <nvalloc.h>
+
 #define DEFINE_POPULATE(fname, type1, type2, init)		\
 static inline void fname##_init(struct mm_struct *mm,		\
 		type1##_t *arg1, type2##_t *arg2, bool init)	\
@@ -1328,14 +1330,63 @@ failed:
 	panic("Failed to pre-allocate %s pages for vmalloc area\n", lvl);
 }
 
+#ifdef CONFIG_NVALLOC
+
+struct nvalloc_zoneinfo nvalloc_zoneinfo_fn(u32 zone_idx)
+{
+	struct zone *zone = &NODE_DATA(zone_idx / MAX_NR_ZONES)
+				     ->node_zones[zone_idx % MAX_NR_ZONES];
+
+	return (struct nvalloc_zoneinfo){
+		.skip = !populated_zone(zone),
+		.persistent = false,
+		.start = pfn_to_kaddr(zone->zone_start_pfn),
+		.pages = zone->spanned_pages,
+	};
+}
+
+void mem_init_nvalloc(void)
+{
+	unsigned int zones = 0;
+	int ret;
+
+	zones = MAX_NR_ZONES * num_possible_nodes();
+
+	pr_info("nvalloc: init for %u zones on %u cpus", zones,
+		num_possible_cpus());
+
+	ret = nvalloc_init(zones, num_possible_cpus(), nvalloc_zoneinfo_fn);
+
+	pr_info("nvalloc: init ret=%d", ret);
+	BUG_ON(ret != 0);
+}
+
+#endif
+
 void __init mem_init(void)
 {
 	pci_iommu_alloc();
 
 	/* clear_bss() already clear the empty_zero_page */
 
+#ifdef CONFIG_NVALLOC
+	mem_init_nvalloc();
+#endif
+
 	/* this will put all memory onto the freelists */
 	memblock_free_all();
+#ifdef CONFIG_NVALLOC
+	{
+		struct zone *zone;
+		int zid = 0;
+		for_each_zone(zone) {
+			u64 free_pages = nvalloc_free(zid);
+			pr_info("nvalloc: zid=%d free=%llu", zid, free_pages);
+			zid += 1;
+		}
+	};
+#endif
+
 	after_bootmem = 1;
 	x86_init.hyper.init_after_bootmem();
 

@@ -15,6 +15,8 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
+#include "nvalloc.h"
+
 #include <linux/stddef.h>
 #include <linux/mm.h>
 #include <linux/highmem.h>
@@ -895,7 +897,8 @@ static inline bool pcp_allowed_order(unsigned int order)
 
 static inline void free_the_page(struct page *page, unsigned int order)
 {
-	if (pcp_allowed_order(order))		/* Via pcp? */
+
+	if (!IS_ENABLED(CONFIG_NVALLOC) && pcp_allowed_order(order))	/* Via pcp? */
 		free_unref_page(page, order);
 	else
 		__free_pages_ok(page, order, FPI_NONE);
@@ -1237,6 +1240,33 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
  * -- nyc
  */
 
+#ifdef CONFIG_NVALLOC
+// TODO: replace this one?
+static inline void __free_one_page(struct page *page,
+		unsigned long pfn,
+		struct zone *zone, unsigned int order,
+		int migratetype, fpi_t fpi_flags)
+{
+	// First what are all of these args doing?
+	// page, pfn, zone, order are clear
+	// migratetype: ?
+	// fpi_flags: buddy alloc specific (free notifications, list opt, kasan poisioning)
+	u64 ret;
+	int cpu = get_cpu();
+	u32 zid = zone_idx(zone) + MAX_NR_ZONES * page_to_nid(page);
+
+	if (likely(!is_migrate_isolate(migratetype)))
+		__mod_zone_freepage_state(zone, 1 << order, migratetype);
+
+	ret = nvalloc_put(zid, cpu, page_to_virt(page), order);
+	put_cpu();
+	VM_BUG_ON_PAGE(ret != 0, page);
+
+	/* Notify page reporting subsystem of freed page */
+	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
+		page_reporting_notify_free(order);
+}
+#else // !CONFIG_NVALLOC
 static inline void __free_one_page(struct page *page,
 		unsigned long pfn,
 		struct zone *zone, unsigned int order,
@@ -1317,6 +1347,7 @@ done_merging:
 	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
 		page_reporting_notify_free(order);
 }
+#endif // CONFIG_NVALLOC
 
 /**
  * split_free_page() -- split a free page at split_pfn_offset
@@ -1939,6 +1970,7 @@ int __meminit early_pfn_to_nid(unsigned long pfn)
 }
 #endif /* CONFIG_NUMA */
 
+#if 1
 void __init memblock_free_pages(struct page *page, unsigned long pfn,
 							unsigned int order)
 {
@@ -1950,6 +1982,19 @@ void __init memblock_free_pages(struct page *page, unsigned long pfn,
 	}
 	__free_pages_core(page, order);
 }
+#else
+void __init memblock_free_pages(struct page *page, unsigned long pfn,
+				unsigned int order)
+{
+	u64 ret;
+	int cpu = get_cpu();
+	u32 zid = zone_idx(page_zone(page)) + MAX_NR_ZONES * page_to_nid(page);
+
+	ret = nvalloc_put(zid, cpu, page_to_virt(page), order);
+	put_cpu();
+	BUG_ON(ret != 0);
+}
+#endif
 
 /*
  * Check that the whole (or subset of) a pageblock given by the interval of
@@ -5496,6 +5541,28 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
  *
  * Returns the number of pages on the list or array.
  */
+#ifdef CONFIG_NVALLOC
+unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
+				 nodemask_t *nodemask, int nr_pages,
+				 struct list_head *page_list,
+				 struct page **page_array)
+{
+	struct page *page;
+	int nr_populated = 0;
+
+	page = __alloc_pages(gfp, 0, preferred_nid, nodemask);
+	if (page) {
+		if (page_list)
+			list_add(&page->lru, page_list);
+		else
+			page_array[nr_populated] = page;
+		nr_populated++;
+	}
+
+	size_counters_bulk_alloc(nr_populated);
+	return nr_populated;
+}
+#else // CONFIG_NVALLOC
 unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 			nodemask_t *nodemask, int nr_pages,
 			struct list_head *page_list,
@@ -5645,11 +5712,78 @@ failed:
 
 	goto out;
 }
+#endif
 EXPORT_SYMBOL_GPL(__alloc_pages_bulk);
 
 /*
  * This is the 'heart' of the zoned buddy allocator.
  */
+#ifdef CONFIG_NVALLOC
+struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
+			   nodemask_t *nodemask)
+{
+	int cpu;
+	u8 *addr;
+	struct page *page;
+	unsigned int alloc_flags = ALLOC_WMARK_LOW;
+	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
+	struct alloc_context ac = {};
+
+	/*
+	 * There are several places where we assume that the order value is sane
+	 * so bail out early if the request is out of bound.
+	 */
+	if (WARN_ON_ONCE_GFP(order >= MAX_ORDER, gfp))
+		return NULL;
+
+	gfp &= gfp_allowed_mask;
+	/*
+	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS
+	 * resp. GFP_NOIO which has to be inherited for all allocation requests
+	 * from a particular context which has been marked by
+	 * memalloc_no{fs,io}_{save,restore}. And PF_MEMALLOC_PIN which ensures
+	 * movable zones are not used during allocation.
+	 */
+	gfp = current_gfp_context(gfp);
+	alloc_gfp = gfp;
+	if (!prepare_alloc_pages(gfp, order, preferred_nid, nodemask, &ac,
+				 &alloc_gfp, &alloc_flags))
+		return NULL;
+
+	/*
+	 * Forbid the first pass from falling back to types that fragment
+	 * memory until all local zones are considered.
+	 */
+	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp);
+
+	/* First allocation attempt */
+	cpu = get_cpu();
+	addr = nvalloc_get(ac.preferred_zoneref->zone_idx, cpu, order);
+	if (nvalloc_err((u64)addr)) {
+		pr_err("nvalloc: get failure %llu o=%u (cpu=%d, zid=%d)",
+		       (u64)addr, order, cpu, ac.preferred_zoneref->zone_idx);
+		put_cpu();
+		return NULL;
+	}
+
+	put_cpu();
+	page = virt_to_page(addr);
+
+	// from get_page_from_freelist
+	prep_new_page(page, order, gfp, alloc_flags);
+
+	if (memcg_kmem_enabled() && (gfp & __GFP_ACCOUNT) && page &&
+	    unlikely(__memcg_kmem_charge_page(page, gfp, order) != 0)) {
+		__free_pages(page, order);
+		page = NULL;
+	}
+
+	trace_mm_page_alloc(page, order, alloc_gfp, ac.migratetype);
+	size_counters_alloc(order);
+
+	return page;
+}
+#else // CONFIG_NVALLOC
 struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 							nodemask_t *nodemask)
 {
@@ -5714,6 +5848,7 @@ out:
 
 	return page;
 }
+#endif // CONFIG_NVALLOC
 EXPORT_SYMBOL(__alloc_pages);
 
 struct folio *__folio_alloc(gfp_t gfp, unsigned int order, int preferred_nid,

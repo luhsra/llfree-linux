@@ -3,10 +3,11 @@
 In addition to the general dependencies rust `nightly` version `1.64.0` (or newer) is needed.
 > Rustup is recommended: [install rust](https://www.rust-lang.org/learn/get-started)
 
-Then the Kernel can be build (with llvm):
+First enable the `CONFIG_NVALLOC` option (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
+Then the Kernel can be build as usual (with llvm):
 
-```
-make LLVM=1 ...
+```sh
+make LLVM=1 #...
 ```
 
 ## Structure
@@ -16,7 +17,7 @@ It consists of a rust library that uses the [nvalloc-rs](https://scm.sra.uni-han
 
 ## Problems
 
-- Please increase KSYM_NAME_LEN both in kernel and kallsyms.c
+- Please increase `KSYM_NAME_LEN` both in kernel and kallsyms.c
 - Non-allocatable sections: .llvmbc, .llvmcmd
 - Unknown sections: .text.__rust_probestack, .eh_frame
 
@@ -38,4 +39,5 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 }
 ```
 
-Logging is automatically initialized with the allocator.
+> Logging is automatically initialized with the allocator.
+

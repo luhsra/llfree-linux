@@ -20,11 +20,14 @@ panic = "abort"
 [dependencies]
 cfg-if = "1.0"
 log = { version = "0.4", default-features = false }
-nvalloc = { git = "ssh://git@scm.sra.uni-hannover.de/research/nvalloc-rs.git", default-features = false }
+
+[dependencies.nvalloc]
+git = "ssh://git@scm.sra.uni-hannover.de/research/nvalloc-rs.git"
+default-features = false
 
 [features]
 default = ["log_warn"]
-log_debug = ["nvalloc/log_debug", "log/max_level_debug"]
-log_info = ["nvalloc/log_info", "log/max_level_info"]
-log_warn = ["nvalloc/log_warn", "log/max_level_warn"]
-log_error = ["nvalloc/log_error", "log/max_level_error"]
+log_debug = ["nvalloc/log_debug", "log/release_max_level_debug"]
+log_info = ["nvalloc/log_info", "log/release_max_level_info"]
+log_warn = ["nvalloc/log_warn", "log/release_max_level_warn"]
+log_error = ["nvalloc/log_error", "log/release_max_level_error"]

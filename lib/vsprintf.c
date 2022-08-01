@@ -2461,8 +2461,10 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 		default:
 			return error_string(buf, end, "(einval)", spec);
 		}
+#ifdef CONFIG_NVALLOC
 	case 'A':
 		return rust_fmt_argument(buf, end, ptr);
+#endif
 	default:
 		return default_pointer(buf, end, ptr, spec);
 	}

@@ -1028,6 +1028,7 @@
 	*(.modinfo)							\
 	/* ld.bfd warns about .gnu.version* even when not emitted */	\
 	*(.gnu.version*)						\
+	*(.gnu.lto_*) 							\
 
 #define DISCARDS							\
 	/DISCARD/ : {							\

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "NVAlloc Page Allocator"
+
+config NVALLOC
+	bool "NVALLOC Allocator"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  A new experimental allocator for volatile and persistent memory.
+
+endmenu

@@ -136,4 +136,4 @@ obj-$(CONFIG_GENERIC_IOREMAP) += ioremap.o
 obj-$(CONFIG_SHRINKER_DEBUG) += shrinker_debug.o
 
 # NVAlloc
-obj-y += nvalloc/
+obj-$(CONFIG_NVALLOC) += nvalloc/

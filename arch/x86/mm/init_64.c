@@ -1332,33 +1332,31 @@ failed:
 
 #ifdef CONFIG_NVALLOC
 
-struct nvalloc_zoneinfo nvalloc_zoneinfo_fn(u32 zone_idx)
-{
-	struct zone *zone = &NODE_DATA(zone_idx / MAX_NR_ZONES)
-				     ->node_zones[zone_idx % MAX_NR_ZONES];
-
-	return (struct nvalloc_zoneinfo){
-		.skip = !populated_zone(zone),
-		.persistent = false,
-		.start = pfn_to_kaddr(zone->zone_start_pfn),
-		.pages = zone->spanned_pages,
-	};
-}
-
 void mem_init_nvalloc(void)
 {
-	unsigned int zones = 0;
-	int ret;
+	int zid = 0;
+	struct zone *zone;
 
-	zones = MAX_NR_ZONES * num_possible_nodes();
+	for_each_zone(zone) {
+		void *nvalloc;
 
-	pr_info("nvalloc: init for %u zones on %u cpus", zones,
-		num_possible_cpus());
+		if (!populated_zone(zone) || zone->spanned_pages == 0)
+			continue;
 
-	ret = nvalloc_init(zones, num_possible_cpus(), nvalloc_zoneinfo_fn);
-
-	pr_info("nvalloc: init ret=%d", ret);
-	BUG_ON(ret != 0);
+		pr_info("nvalloc: init zone %d on %u cpus", zid,
+			num_possible_cpus());
+		nvalloc =
+			nvalloc_init(num_possible_cpus(), false,
+					pfn_to_kaddr(zone->zone_start_pfn),
+					zone->spanned_pages);
+		if (nvalloc_err((u64)nvalloc)) {
+			pr_err("nvalloc: init failure zid=%d", zid);
+			BUG();
+		} else {
+			zone->nvalloc = nvalloc;
+		}
+		zid += 1;
+	}
 }
 
 #endif
@@ -1380,7 +1378,7 @@ void __init mem_init(void)
 		struct zone *zone;
 		int zid = 0;
 		for_each_zone(zone) {
-			u64 free_pages = nvalloc_free(zid);
+			u64 free_pages = nvalloc_free_count(zone->nvalloc);
 			pr_info("nvalloc: zid=%d free=%llu", zid, free_pages);
 			zid += 1;
 		}

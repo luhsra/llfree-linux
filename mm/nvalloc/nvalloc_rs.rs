@@ -6,14 +6,12 @@ extern crate alloc;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{c_char, c_void};
-use core::fmt;
+use core::fmt::{self, Write};
 use core::panic::PanicInfo;
-use core::ptr;
-use core::sync::atomic::{self, AtomicPtr, AtomicU32, Ordering};
+use core::sync::atomic::{self, Ordering};
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
-use log::{error, warn, Level, Metadata, Record, SetLoggerError};
+use log::{error, warn, Level, Metadata, Record};
 
 use nvalloc::lower::AtomLower;
 use nvalloc::table::PT_LEN;
@@ -29,13 +27,10 @@ extern "C" {
     /// Linux provided free function
     fn nvalloc_linux_free(ptr: *mut u8, size: u64, align: u64);
     /// Linux provided printk function
-    fn nvalloc_printk(format: *const u8, module_name: *const u8, args: *const c_void);
+    fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
 type Allocator = ArrayAtomicAlloc<AtomLower<128>>;
-const INITIALIZING: *mut Allocator = 1 as _;
-static ALLOC: AtomicPtr<Allocator> = AtomicPtr::new(ptr::null_mut());
-static ZONES: AtomicU32 = AtomicU32::new(1);
 
 #[repr(C)]
 pub struct ZoneInfo {
@@ -50,106 +45,51 @@ pub struct ZoneInfo {
 /// Returns 0 on success or an error code.
 #[no_mangle]
 pub extern "C" fn nvalloc_init(
-    zones: u32,
     cores: u32,
-    zoneinfo: unsafe extern "C" fn(u32) -> ZoneInfo,
-) -> u64 {
+    persistent: u8,
+    start: *mut c_void,
+    pages: u64,
+) -> *mut c_void {
+    init_logging();
+
     warn!("Initializing inside rust");
 
-    if init_logging().is_err() {
-        return Error::Initialization as u64;
-    }
+    let persistent = persistent != 0;
+    assert!(!persistent, "Currently not supported!");
 
-    if let Ok(_) = ALLOC.compare_exchange(
-        ptr::null_mut(),
-        INITIALIZING,
-        Ordering::SeqCst,
-        Ordering::SeqCst,
-    ) {
-        ZONES.store(zones, Ordering::SeqCst);
+    let mut alloc = Box::new(Allocator::default());
+    if pages > 0 {
+        let aligned = nvalloc::util::align_down(start as usize, Page::SIZE * PT_LEN) as *mut c_void;
+        let offset = div_ceil(start as usize - aligned as usize, Page::SIZE);
 
-        let mut allocs = Vec::with_capacity(zones as _);
-
-        for zid in 0..zones {
-            let ZoneInfo {
-                skip,
-                persistent,
-                start,
-                pages,
-            } = unsafe { zoneinfo(zid) };
-
-            let persistent = persistent != 0;
-            assert!(!persistent, "Currently not supported!");
-
-            let mut alloc = Allocator::default();
-            if skip == 0 && pages > 0 {
-                let aligned =
-                    nvalloc::util::align_down(start as usize, Page::SIZE * PT_LEN) as *mut c_void;
-                let offset = div_ceil(start as usize - aligned as usize, Page::SIZE);
-
-                let memory = unsafe {
-                    core::slice::from_raw_parts_mut(aligned.cast(), pages as usize + offset)
-                };
-                if let Err(e) = alloc
-                    .init(cores as _, memory, persistent)
-                    .and_then(|_| alloc.reserve_all())
-                {
-                    let _ = ALLOC.compare_exchange(
-                        INITIALIZING,
-                        ptr::null_mut(),
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    );
-                    return e as u64;
-                }
-                warn!(
-                    "setup z={zid} mem={:?} ({})",
-                    memory.as_ptr_range(),
-                    alloc.pages()
-                );
-            }
-            allocs.push(alloc);
+        let memory =
+            unsafe { core::slice::from_raw_parts_mut(aligned.cast(), pages as usize + offset) };
+        if let Err(e) = alloc
+            .init(cores as _, memory, persistent)
+            .and_then(|_| alloc.reserve_all())
+        {
+            return e as usize as _;
         }
-
-        match ALLOC.compare_exchange(
-            INITIALIZING,
-            allocs.leak().as_mut_ptr(),
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        ) {
-            Ok(_) => 0,
-            Err(_) => Error::Initialization as u64,
-        }
+        warn!("setup mem={:?} ({})", memory.as_ptr_range(), alloc.pages());
+        Box::leak(alloc) as *mut Allocator as _
     } else {
-        Error::Initialization as u64
+        Error::Initialization as usize as _
     }
-}
-
-/// Returns if the allocator was initialized
-#[no_mangle]
-pub extern "C" fn nvalloc_initialized() -> u32 {
-    let alloc = ALLOC.load(Ordering::SeqCst);
-    (!alloc.is_null() && alloc != INITIALIZING) as u32
 }
 
 /// Shut down the allocator normally.
 #[no_mangle]
-pub extern "C" fn nvalloc_uninit() {
-    let alloc = ALLOC.swap(ptr::null_mut(), Ordering::SeqCst);
-    if !alloc.is_null() && alloc != INITIALIZING {
-        unsafe { core::mem::drop(Box::from_raw(alloc)) };
+pub extern "C" fn nvalloc_uninit(alloc: *mut c_void) {
+    if !alloc.is_null() {
+        unsafe { core::mem::drop(Box::from_raw(alloc as *mut Allocator)) };
     }
 }
 
 /// Allocates 2^order pages. Returns >=PAGE_SIZE on success an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_get(zone: u32, core: u32, order: u32) -> *mut u8 {
-    if zone >= ZONES.load(Ordering::SeqCst) {
-        return Error::Initialization as u64 as _;
-    }
-    let alloc = ALLOC.load(Ordering::SeqCst);
-    if !alloc.is_null() && alloc != INITIALIZING {
-        let alloc = unsafe { &*alloc.add(zone as _) };
+pub extern "C" fn nvalloc_get(alloc: *const c_void, core: u32, order: u32) -> *mut u8 {
+    if !alloc.is_null() {
+        let alloc: &Allocator = unsafe { &*alloc.cast() };
         // warn!(
         //     "get z={zone} c={core} o={order} free={}",
         //     alloc.pages() - alloc.dbg_allocated_pages()
@@ -165,13 +105,9 @@ pub extern "C" fn nvalloc_get(zone: u32, core: u32, order: u32) -> *mut u8 {
 
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_put(zone: u32, core: u32, addr: *mut u8, order: u32) -> u64 {
-    if zone >= ZONES.load(Ordering::SeqCst) {
-        return Error::Initialization as u64 as _;
-    }
-    let alloc = ALLOC.load(Ordering::SeqCst);
-    if !alloc.is_null() && alloc != INITIALIZING {
-        let alloc = unsafe { &*alloc.add(zone as _) };
+pub extern "C" fn nvalloc_put(alloc: *const c_void, core: u32, addr: *mut u8, order: u32) -> u64 {
+    if !alloc.is_null() {
+        let alloc: &Allocator = unsafe { &*alloc.cast() };
         // warn!(
         //     "put z={zone} c={core} o={order} free={}",
         //     alloc.pages() - alloc.dbg_allocated_pages()
@@ -186,13 +122,9 @@ pub extern "C" fn nvalloc_put(zone: u32, core: u32, addr: *mut u8, order: u32) -
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_free(zone: u32) -> u64 {
-    if zone >= ZONES.load(Ordering::SeqCst) {
-        return 0;
-    }
-    let alloc = ALLOC.load(Ordering::SeqCst);
-    if !alloc.is_null() && alloc != INITIALIZING {
-        let alloc = unsafe { &*alloc.add(zone as _) };
+pub extern "C" fn nvalloc_free_count(alloc: *const c_void) -> u64 {
+    if !alloc.is_null() {
+        let alloc: &Allocator = unsafe { &*alloc.cast() };
         (alloc.pages() - alloc.dbg_allocated_pages()) as u64
     } else {
         0
@@ -200,14 +132,23 @@ pub extern "C" fn nvalloc_free(zone: u32) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_dump(zone: u32) {
-    if zone >= ZONES.load(Ordering::SeqCst) {
-        return;
-    }
-    let alloc = ALLOC.load(Ordering::SeqCst);
-    if !alloc.is_null() && alloc != INITIALIZING {
-        let alloc = unsafe { &*alloc.add(zone as _) };
+pub extern "C" fn nvalloc_printk(alloc: *const c_void) {
+    if !alloc.is_null() {
+        let alloc: &Allocator = unsafe { &*alloc.cast() };
         warn!("{alloc:?}");
+    }
+}
+
+/// # Safety
+/// This writes into the provided memory buffer which has to be valid.
+#[no_mangle]
+pub unsafe extern "C" fn nvalloc_dump(alloc: *const c_void, buf: *mut u8, len: u64) {
+    if !alloc.is_null() {
+        let alloc: &Allocator = &*alloc.cast();
+        let mut writer = RawFormatter::from_buffer(buf, len as _);
+        if writeln!(writer, "{alloc:?}").is_err() {
+            error!("write failed after {}B", writer.bytes_written());
+        }
     }
 }
 
@@ -285,8 +226,9 @@ impl log::Log for PrintKLogger {
 
 static LOGGER: PrintKLogger = PrintKLogger;
 
-pub fn init_logging() -> Result<(), SetLoggerError> {
-    log::set_logger(&LOGGER).map(|()| log::set_max_level(max_log_level().to_level_filter()))
+pub fn init_logging() {
+    let _ignored =
+        log::set_logger(&LOGGER).map(|()| log::set_max_level(max_log_level().to_level_filter()));
 }
 
 // Called from `vsprintf` with format specifier `%pA`.
@@ -296,7 +238,6 @@ pub extern "C" fn rust_fmt_argument(
     end: *mut c_char,
     ptr: *const c_void,
 ) -> *mut c_char {
-    use fmt::Write;
     // SAFETY: The C contract guarantees that `buf` is valid if it's less than `end`.
     let mut w = unsafe { RawFormatter::from_ptrs(buf.cast(), end.cast()) };
     let record = unsafe { &*(ptr as *const Record) };
@@ -383,7 +324,7 @@ pub mod format_strings {
 #[doc(hidden)]
 pub unsafe fn call_printk(format_string: &[u8; format_strings::LENGTH], args: &Record) {
     // `_printk` does not seem to fail in any path.
-    nvalloc_printk(
+    nvalloc_linux_printk(
         format_string.as_ptr() as _,
         MOD.as_ptr(),
         args as *const _ as *const c_void,

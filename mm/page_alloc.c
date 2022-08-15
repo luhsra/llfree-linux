@@ -1147,6 +1147,7 @@ compaction_capture(struct capture_control *capc, struct page *page,
 }
 #endif /* CONFIG_COMPACTION */
 
+#ifndef CONFIG_NVALLOC
 /* Used for pages not on another list */
 static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
@@ -1217,6 +1218,8 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 	return find_buddy_page_pfn(higher_page, higher_page_pfn, order + 1,
 			NULL) != NULL;
 }
+
+#endif // CONFIG_NVALLOC
 
 /*
  * Freeing function for a buddy system allocator.
@@ -1349,6 +1352,7 @@ done_merging:
 }
 #endif // CONFIG_NVALLOC
 
+#ifndef CONFIG_NVALLOC
 /**
  * split_free_page() -- split a free page at split_pfn_offset
  * @free_page:		the original free page
@@ -1372,9 +1376,6 @@ int split_free_page(struct page *free_page,
 	int free_page_order;
 	int mt;
 	int ret = 0;
-
-	// TODO: do we have to implement this for the nvalloc?
-	WARN_ON_ONCE(IS_ENABLED(CONFIG_NVALLOC));
 
 	if (split_pfn_offset == 0)
 		return ret;
@@ -1410,6 +1411,17 @@ out:
 	spin_unlock_irqrestore(&zone->lock, flags);
 	return ret;
 }
+#else
+int split_free_page(struct page *free_page, unsigned int order,
+		    unsigned long split_pfn_offset)
+{
+	// TODO: do we have to implement this for the nvalloc?
+	WARN_ON_ONCE(IS_ENABLED(CONFIG_NVALLOC));
+	return 0;
+}
+#endif // CONFIG_NVALLOC
+
+
 /*
  * A bad page could be due to a number of fields. Instead of multiple branches,
  * try and check multiple fields with one check. The caller must do a detailed
@@ -2517,6 +2529,7 @@ void __init init_cma_reserved_pageblock(struct page *page)
  *
  * -- nyc
  */
+#ifndef CONFIG_NVALLOC
 static inline void expand(struct zone *zone, struct page *page,
 	int low, int high, int migratetype)
 {
@@ -2540,6 +2553,7 @@ static inline void expand(struct zone *zone, struct page *page,
 		set_buddy_order(&page[size], high);
 	}
 }
+#endif // CONFIG_NVALLOC
 
 static void check_new_page_bad(struct page *page)
 {
@@ -2726,6 +2740,7 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 		clear_page_pfmemalloc(page);
 }
 
+#ifndef CONFIG_NVALLOC
 /*
  * Go through the free lists for the given migratetype and remove
  * the smallest available page from the freelists
@@ -2755,6 +2770,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 	return NULL;
 }
+#endif // CONFIG_NVALLOC
 
 
 /*
@@ -2780,6 +2796,7 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
 					unsigned int order) { return NULL; }
 #endif
 
+#ifndef CONFIG_NVALLOC
 /*
  * Move the free pages in a range to the freelist tail of the requested type.
  * Note that start_page and end_pages are not aligned on a pageblock
@@ -2843,6 +2860,14 @@ int move_freepages_block(struct zone *zone, struct page *page,
 	return move_freepages(zone, start_pfn, end_pfn, migratetype,
 								num_movable);
 }
+#else
+int move_freepages_block(struct zone *zone, struct page *page, int migratetype,
+			 int *num_movable)
+{
+	WARN_ON(true);
+	return 0;
+}
+#endif // CONFIG_NVALLOC
 
 #ifndef CONFIG_NVALLOC
 
@@ -3820,6 +3845,7 @@ void split_page(struct page *page, unsigned int order)
 }
 EXPORT_SYMBOL_GPL(split_page);
 
+#ifndef CONFIG_NVALLOC
 int __isolate_free_page(struct page *page, unsigned int order)
 {
 	struct zone *zone = page_zone(page);
@@ -3885,7 +3911,18 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 	__free_one_page(page, page_to_pfn(page), zone, order, mt,
 			FPI_SKIP_REPORT_NOTIFY | FPI_TO_TAIL);
 }
+#else
 
+#endif // CONFIG_NVALLOC
+int __isolate_free_page(struct page *page, unsigned int order)
+{
+	VM_BUG_ON(true);
+	return 0;
+}
+void __putback_isolated_page(struct page *page, unsigned int order, int mt)
+{
+	VM_BUG_ON(true);
+}
 #ifndef CONFIG_NVALLOC
 
 /*

@@ -10,7 +10,7 @@ $(nvalloc-a):
 	cd mm/nvalloc && cargo build -r
 
 mm/nvalloc/nvalloc_rs.o: $(nvalloc-a)
-	ld.lld -r -m elf_x86_64 --lto-O3 --thinlto-jobs=4 --whole-archive $^ -o $@
+	ld.lld -r -m elf_x86_64 --thinlto-jobs=4 --whole-archive $^ -o $@
 
 # Manual compilation
 .PHONY: $(nvalloc-a)

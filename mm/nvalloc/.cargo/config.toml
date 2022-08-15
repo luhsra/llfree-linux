@@ -1,18 +1,16 @@
 [build]
 target = "x86_64-linux.json"
 rustflags = [
-        "-Zno-unique-section-names",
-        "-Ccodegen-units=1",
-        "-Crelocation-model=static",
-        "-Zfunction-sections=n",
-        "-Ctarget-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2",
-        "-Ztune-cpu=generic",
-        "-Cno-redzone=y",
         "-Ccode-model=kernel",
-        "-Ctarget-feature=+retpoline-external-thunk",
-        "-Cdebug-assertions=n",
-        "-Coverflow-checks=y",
-        "-Copt-level=2",
+        "-Cembed-bitcode=n",
+        "-Cforce-unwind-tables=n",
+        "-Cno-redzone=y",
+        "-Crelocation-model=static",
+        "-Csymbol-mangling-version=v0",
+        "-Ctarget-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2",
+        "-Zbinary_dep_depinfo=y",
+        "-Zfunction-sections=n",
+        "-Ztune-cpu=generic",
 ]
 
 [unstable]

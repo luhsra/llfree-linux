@@ -13,9 +13,9 @@ use core::sync::atomic::{self, Ordering};
 use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
-use nvalloc::lower::AtomLower;
+use nvalloc::lower::Atom;
 use nvalloc::table::PT_LEN;
-use nvalloc::upper::{Alloc, ArrayAtomicAlloc};
+use nvalloc::upper::{Alloc, ArrayList};
 use nvalloc::util::{div_ceil, Page};
 use nvalloc::Error;
 
@@ -30,7 +30,7 @@ extern "C" {
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = ArrayAtomicAlloc<AtomLower<128>>;
+type Allocator = ArrayList<Atom<128>>;
 
 #[repr(C)]
 pub struct ZoneInfo {
@@ -90,10 +90,6 @@ pub extern "C" fn nvalloc_uninit(alloc: *mut c_void) {
 pub extern "C" fn nvalloc_get(alloc: *const c_void, core: u32, order: u32) -> *mut u8 {
     if !alloc.is_null() {
         let alloc: &Allocator = unsafe { &*alloc.cast() };
-        // warn!(
-        //     "get z={zone} c={core} o={order} free={}",
-        //     alloc.pages() - alloc.dbg_allocated_pages()
-        // );
         match alloc.get(core as _, order as _) {
             Ok(addr) => addr as _,
             Err(e) => e as u64 as _,
@@ -108,10 +104,6 @@ pub extern "C" fn nvalloc_get(alloc: *const c_void, core: u32, order: u32) -> *m
 pub extern "C" fn nvalloc_put(alloc: *const c_void, core: u32, addr: *mut u8, order: u32) -> u64 {
     if !alloc.is_null() {
         let alloc: &Allocator = unsafe { &*alloc.cast() };
-        // warn!(
-        //     "put z={zone} c={core} o={order} free={}",
-        //     alloc.pages() - alloc.dbg_allocated_pages()
-        // );
         match alloc.put(core as _, addr as _, order as _) {
             Ok(_) => 0,
             Err(e) => e as u64,

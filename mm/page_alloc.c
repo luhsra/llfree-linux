@@ -3913,8 +3913,6 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 			FPI_SKIP_REPORT_NOTIFY | FPI_TO_TAIL);
 }
 #else
-
-#endif // CONFIG_NVALLOC
 int __isolate_free_page(struct page *page, unsigned int order)
 {
 	VM_BUG_ON(true);
@@ -3924,6 +3922,7 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 {
 	VM_BUG_ON(true);
 }
+#endif // CONFIG_NVALLOC
 #ifndef CONFIG_NVALLOC
 
 /*

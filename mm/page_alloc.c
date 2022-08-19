@@ -15,6 +15,8 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
+#include "linux/preempt.h"
+#include "linux/smp.h"
 #include <nvalloc.h>
 
 #include <linux/stddef.h>
@@ -4776,7 +4778,21 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 	/* Try get a page from the freelist if available */
 	if (!page)
+#ifdef CONFIG_NVALLOC
+	{
+		u8 *addr = nvalloc_get(ac->preferred_zoneref->zone->nvalloc, get_cpu(), order);
+		put_cpu();
+		if (!nvalloc_err((u64)addr)) {
+			page = virt_to_page(addr);
+			prep_new_page(page, order, gfp_mask, alloc_flags);
+		} else {
+			BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+		}
+
+	}
+#else
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
+#endif
 
 	if (page) {
 		struct zone *zone = page_zone(page);
@@ -5820,6 +5836,8 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = {};
 
+	enum compact_result compact_result;
+
 	/*
 	 * There are several places where we assume that the order value is sane
 	 * so bail out early if the request is out of bound.
@@ -5848,18 +5866,29 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	/* First allocation attempt */
 	cpu = get_cpu();
 	addr = nvalloc_get(ac.preferred_zoneref->zone->nvalloc, cpu, order);
-	if (nvalloc_err((u64)addr)) {
+	if (!nvalloc_err((u64)addr)) {
+		page = virt_to_page(addr);
+	} else {
+		put_cpu();
 		pr_err("nvalloc: get failure %llu o=%u (cpu=%d, zid=%d)",
 		       (u64)addr, order, cpu, ac.preferred_zoneref->zone_idx);
-		put_cpu();
-		VM_BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
-		return NULL;
-	}
-	__mod_zone_freepage_state(ac.preferred_zoneref->zone, -1 << order,
-				  ac.migratetype);
 
+		if ((u64)addr == NVALLOC_ERROR_MEMORY &&
+		    order > PAGE_ALLOC_COSTLY_ORDER) {
+			// TODO: call compaction more often
+			// (every time an internal realloc due to fragmentation is performed)
+			page = __alloc_pages_direct_compact(
+				gfp, order, alloc_flags, &ac,
+				DEF_COMPACT_PRIORITY, &compact_result);
+			preempt_disable();
+		} else {
+			VM_BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+			return NULL;
+		}
+	}
+	__mod_zone_freepage_state(ac.preferred_zoneref->zone, -(1 << order),
+				  ac.migratetype);
 	put_cpu();
-	page = virt_to_page(addr);
 
 	// from get_page_from_freelist
 	prep_new_page(page, order, gfp, alloc_flags);

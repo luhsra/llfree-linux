@@ -6,6 +6,8 @@
 #include <linux/module.h>
 #include <linux/memblock.h>
 #include <linux/mmzone.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("NVM Allocator");
@@ -24,45 +26,75 @@ void nvalloc_linux_free(u8 *ptr, u64 size, u64 align)
 	memblock_free(ptr, size);
 }
 /// Linux provided printk function
-void nvalloc_linux_printk(const u8 *format, const u8 *module_name, const void *args)
+void nvalloc_linux_printk(const u8 *format, const u8 *module_name,
+			  const void *args)
 {
 	_printk(format, module_name, args);
 }
 
+static void *frag_start(struct seq_file *m, loff_t *pos)
+{
+	pg_data_t *pgdat;
+	loff_t node = *pos;
+
+	for (pgdat = first_online_pgdat(); pgdat && node;
+	     pgdat = next_online_pgdat(pgdat))
+		--node;
+
+	return pgdat;
+}
+
+static void *frag_next(struct seq_file *m, void *arg, loff_t *pos)
+{
+	pg_data_t *pgdat = (pg_data_t *)arg;
+
+	(*pos)++;
+	return next_online_pgdat(pgdat);
+}
+
+static void frag_stop(struct seq_file *m, void *arg)
+{
+}
+
+static int nvalloc_show(struct seq_file *m, void *arg)
+{
+	pg_data_t *pgdat = (pg_data_t *)arg;
+	struct zone *zone;
+	struct zone *node_zones = pgdat->node_zones;
+
+	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
+		char *buf;
+		size_t len;
+
+		if (!populated_zone(zone))
+			continue;
+
+		len = seq_get_buf(m, &buf);
+		if (len > 0) {
+			preempt_disable();
+			len = min(len, (size_t)nvalloc_dump(zone->nvalloc, buf,
+							    len));
+			preempt_enable();
+			seq_commit(m, len);
+		} else {
+			seq_commit(m, -1);
+			pr_err("buf empty\n");
+		}
+	}
+	return 0;
+}
+
+static const struct seq_operations nvalloc_op = {
+	.start = frag_start,
+	.next = frag_next,
+	.stop = frag_stop,
+	.show = nvalloc_show,
+};
+
 static int __init nvalloc_init_module(void)
 {
-	int cpu;
-	s64 ret;
-	void *addr;
-	void *alloc;
-
-	pr_info("try allocation");
-
-	alloc = first_online_pgdat()->node_zones[ZONE_NORMAL].nvalloc;
-
-	cpu = get_cpu();
-	addr = nvalloc_get(alloc, cpu, 0);
-	if (nvalloc_err((u64)(addr)))
-	{
-		put_cpu();
-		pr_info("error alloc %ld\n", (u64)addr);
-		return -ENOMEM;
-	}
-	put_cpu();
-
-	pr_info("allocated %p on %d\n", addr, cpu);
-
-	cpu = get_cpu();
-	ret = nvalloc_put(alloc, cpu, addr, 0);
-	if (nvalloc_err(ret))
-	{
-		put_cpu();
-		pr_info("error free %ld\n", ret);
-		return -ENOMEM;
-	}
-	put_cpu();
-
-	pr_info("success\n");
+	pr_info("Setup nvalloc debugging");
+	proc_create_seq("nvalloc", 0444, NULL, &nvalloc_op);
 	return 0;
 }
 

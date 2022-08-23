@@ -270,38 +270,31 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+#ifdef CONFIG_NVALLOC_SIZE_COUNTERS
 // Count different allocation sizes
 struct size_counters {
 	u64 c[2 * MAX_ORDER];
 	u64 bulk;
 };
 static DEFINE_PER_CPU(struct size_counters, size_counters);
-// TODO: determine if needed and what allocations are done before!
-static int size_counters_active = false;
 
 static void size_counters_alloc(int order)
 {
-	if (size_counters_active) {
-		struct size_counters *sc = get_cpu_ptr(&size_counters);
-		sc->c[order] += 1;
-		put_cpu_ptr(sc);
-	}
+	struct size_counters *sc = get_cpu_ptr(&size_counters);
+	sc->c[order] += 1;
+	put_cpu_ptr(sc);
 }
 static void size_counters_bulk_alloc(u64 inc)
 {
-	if (size_counters_active) {
-		struct size_counters *sc = get_cpu_ptr(&size_counters);
-		sc->bulk += inc;
-		put_cpu_ptr(sc);
-	}
+	struct size_counters *sc = get_cpu_ptr(&size_counters);
+	sc->bulk += inc;
+	put_cpu_ptr(sc);
 }
 static void size_counters_free(int order)
 {
-	if (size_counters_active) {
-		struct size_counters *sc = get_cpu_ptr(&size_counters);
-		sc->c[MAX_ORDER + order] += 1;
-		put_cpu_ptr(sc);
-	}
+	struct size_counters *sc = get_cpu_ptr(&size_counters);
+	sc->c[MAX_ORDER + order] += 1;
+	put_cpu_ptr(sc);
 }
 
 #define _check_ret(ret)                                        \
@@ -395,9 +388,17 @@ static int __init size_counters_init()
 	return 0;
 }
 postcore_initcall(size_counters_init);
-// static void size_counters_finalize() {
-// 	kobject_put(size_counters_obj);
-// }
+#else
+static void size_counters_alloc(int order)
+{
+}
+static void size_counters_bulk_alloc(u64 inc)
+{
+}
+static void size_counters_free(int order)
+{
+}
+#endif // CONFIG_NVALLOC_SIZE_COUNTERS
 
 int percpu_pagelist_high_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
@@ -8997,9 +8998,6 @@ void __init page_alloc_init(void)
 					page_alloc_cpu_online,
 					page_alloc_cpu_dead);
 	WARN_ON(ret < 0);
-
-	// Activate percpu size counters
-	size_counters_active = true;
 }
 
 /*

@@ -30,7 +30,7 @@ u64 nvalloc_free_count(void *alloc);
 /// Debug: KPrint the allocator state
 void nvalloc_printk(void *alloc);
 /// Debug: Print allocator state to the given buffer
-void nvalloc_dump(void *alloc, u8 *buf, u64 len);
+u64 nvalloc_dump(void *alloc, u8 *buf, u64 len);
 
 static inline bool nvalloc_err(u64 ret)
 {

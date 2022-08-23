@@ -8,4 +8,10 @@ config NVALLOC
 	help
 	  A new experimental allocator for volatile and persistent memory.
 
+config NVALLOC_SIZE_COUNTERS
+	bool "Size counters"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  Debug counters for page allocations.
+
 endmenu

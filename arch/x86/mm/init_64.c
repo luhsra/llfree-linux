@@ -1334,28 +1334,21 @@ failed:
 
 void mem_init_nvalloc(void)
 {
-	int zid = 0;
 	struct zone *zone;
 
-	for_each_zone(zone) {
+	for_each_populated_zone(zone) {
 		void *nvalloc;
 
-		if (!populated_zone(zone) || zone->spanned_pages == 0)
-			continue;
-
-		pr_info("nvalloc: init zone %d on %u cpus", zid,
-			num_possible_cpus());
-		nvalloc =
-			nvalloc_init(num_possible_cpus(), false,
-					pfn_to_kaddr(zone->zone_start_pfn),
-					zone->spanned_pages);
+		pr_info("nvalloc: init on %u cpus", num_possible_cpus());
+		nvalloc = nvalloc_init(num_possible_cpus(), false,
+				       pfn_to_kaddr(zone->zone_start_pfn),
+				       zone->spanned_pages);
 		if (nvalloc_err((u64)nvalloc)) {
-			pr_err("nvalloc: init failure zid=%d", zid);
+			pr_err("nvalloc: init failure");
 			BUG();
-		} else {
-			zone->nvalloc = nvalloc;
 		}
-		zid += 1;
+
+		zone->nvalloc = nvalloc;
 	}
 }
 
@@ -1378,8 +1371,8 @@ void __init mem_init(void)
 		struct zone *zone;
 		int zid = 0;
 		for_each_zone(zone) {
-			u64 free_pages = nvalloc_free_count(zone->nvalloc);
-			pr_info("nvalloc: zid=%d free=%llu", zid, free_pages);
+			u64 num_pages = nvalloc_free_count(zone->nvalloc);
+			pr_info("nvalloc: zid=%d free=%llu", zid, num_pages);
 			zid += 1;
 		}
 	};

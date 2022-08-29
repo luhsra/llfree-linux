@@ -15,8 +15,6 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
-#include "linux/preempt.h"
-#include "linux/smp.h"
 #include <nvalloc.h>
 
 #include <linux/stddef.h>
@@ -5664,16 +5662,18 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 				 struct list_head *page_list,
 				 struct page **page_array)
 {
-	struct page *page;
 	int nr_populated = 0;
 
-	page = __alloc_pages(gfp, 0, preferred_nid, nodemask);
-	if (page) {
+	for (; nr_populated < nr_pages; nr_populated++) {
+		struct page *page;
+		page = __alloc_pages(gfp, 0, preferred_nid, nodemask);
+		if (page == NULL)
+			break;
+
 		if (page_list)
 			list_add(&page->lru, page_list);
 		else
 			page_array[nr_populated] = page;
-		nr_populated++;
 	}
 
 	size_counters_bulk_alloc(nr_populated);

@@ -130,9 +130,9 @@ pub extern "C" fn nvalloc_printk(alloc: *const c_void) {
 /// # Safety
 /// This writes into the provided memory buffer which has to be valid.
 #[no_mangle]
-pub unsafe extern "C" fn nvalloc_dump(alloc: *const c_void, buf: *mut u8, len: u64) -> u64 {
+pub extern "C" fn nvalloc_dump(alloc: *const c_void, buf: *mut u8, len: u64) -> u64 {
     if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
-        let mut writer = RawFormatter::from_buffer(buf, len as _);
+        let mut writer = unsafe { RawFormatter::from_buffer(buf, len as _) };
         if writeln!(writer, "{alloc:?}").is_err() {
             error!("write failed after {}B", writer.bytes_written());
         }

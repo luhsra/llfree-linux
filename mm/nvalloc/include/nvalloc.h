@@ -24,6 +24,8 @@ void nvalloc_uninit(void *alloc);
 u8 *nvalloc_get(void *alloc, u32 core, u32 order);
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 u64 nvalloc_put(void *alloc, u32 core, u8 *addr, u32 order);
+/// Checks if the page is free
+u64 nvalloc_is_free(void *alloc, u8 *addr, u32 order);
 
 /// Debug: Return number of free pages.
 u64 nvalloc_free_count(void *alloc);

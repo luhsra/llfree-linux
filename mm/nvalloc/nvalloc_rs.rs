@@ -79,7 +79,7 @@ pub extern "C" fn nvalloc_init(
 
 /// Shut down the allocator normally.
 #[no_mangle]
-pub extern "C" fn nvalloc_uninit(alloc: *mut c_void) {
+pub extern "C" fn nvalloc_uninit(alloc: *mut Allocator) {
     if !alloc.is_null() {
         unsafe { core::mem::drop(Box::from_raw(alloc as *mut Allocator)) };
     }
@@ -87,8 +87,8 @@ pub extern "C" fn nvalloc_uninit(alloc: *mut c_void) {
 
 /// Allocates 2^order pages. Returns >=PAGE_SIZE on success an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_get(alloc: *const c_void, core: u32, order: u32) -> *mut u8 {
-    if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
+pub extern "C" fn nvalloc_get(alloc: *const Allocator, core: u32, order: u32) -> *mut u8 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.get(core as _, order as _) {
             Ok(addr) => addr as _,
             Err(e) => e as u64 as _,
@@ -100,8 +100,13 @@ pub extern "C" fn nvalloc_get(alloc: *const c_void, core: u32, order: u32) -> *m
 
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_put(alloc: *const c_void, core: u32, addr: *mut u8, order: u32) -> u64 {
-    if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
+pub extern "C" fn nvalloc_put(
+    alloc: *const Allocator,
+    core: u32,
+    addr: *mut u8,
+    order: u32,
+) -> u64 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.put(core as _, addr as _, order as _) {
             Ok(_) => 0,
             Err(e) => e as u64,
@@ -112,8 +117,17 @@ pub extern "C" fn nvalloc_put(alloc: *const c_void, core: u32, addr: *mut u8, or
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_free_count(alloc: *const c_void) -> u64 {
-    if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
+pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> bool {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.is_free(addr, order)
+    } else {
+        false
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.dbg_free_pages() as u64
     } else {
         0
@@ -121,8 +135,8 @@ pub extern "C" fn nvalloc_free_count(alloc: *const c_void) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_printk(alloc: *const c_void) {
-    if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
+pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
         warn!("{alloc:?}");
     }
 }
@@ -130,8 +144,8 @@ pub extern "C" fn nvalloc_printk(alloc: *const c_void) {
 /// # Safety
 /// This writes into the provided memory buffer which has to be valid.
 #[no_mangle]
-pub extern "C" fn nvalloc_dump(alloc: *const c_void, buf: *mut u8, len: u64) -> u64 {
-    if let Some(alloc) = unsafe { alloc.cast::<Allocator>().as_ref() } {
+pub extern "C" fn nvalloc_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
         let mut writer = unsafe { RawFormatter::from_buffer(buf, len as _) };
         if writeln!(writer, "{alloc:?}").is_err() {
             error!("write failed after {}B", writer.bytes_written());

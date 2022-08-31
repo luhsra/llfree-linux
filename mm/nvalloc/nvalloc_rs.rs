@@ -117,11 +117,11 @@ pub extern "C" fn nvalloc_put(
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> bool {
+pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.is_free(addr, order)
+        alloc.is_free(addr as _, order as _) as _
     } else {
-        false
+        0
     }
 }
 

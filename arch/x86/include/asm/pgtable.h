@@ -816,7 +816,7 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	unsigned long ignore_flags = _PAGE_USER | _PAGE_NX | _PAGE_RW;
+	unsigned long ignore_flags = _PAGE_USER | _PAGE_NX | _PAGE_RW | _PAGE_ACCESSED;
 
 	return (pmd_flags(pmd) & ~ignore_flags) != (_KERNPG_TABLE
 		& ~ignore_flags);

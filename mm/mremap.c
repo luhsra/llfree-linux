@@ -835,6 +835,14 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		goto out;
 	}
 
+	/*
+	 * Don't touch fragile VMA.
+	 */
+	if (vma->vm_flags & VM_FRAGILE) {
+		ret = -EPERM;
+		goto out;
+	}
+
 	/* MREMAP_DONTUNMAP expands by old_len since old_len == new_len */
 	if (flags & MREMAP_DONTUNMAP &&
 		!may_expand_vm(mm, vma->vm_flags, old_len >> PAGE_SHIFT)) {
@@ -945,6 +953,14 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	vma = vma_lookup(mm, addr);
 	if (!vma) {
 		ret = -EFAULT;
+		goto out;
+	}
+
+	/*
+	 * Don't touch fragile VMA.
+	 */
+	if (vma->vm_flags & VM_FRAGILE) {
+		ret = -EPERM;
 		goto out;
 	}
 

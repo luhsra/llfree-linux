@@ -816,8 +816,10 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_flags(pmd) & ~(_PAGE_USER | _PAGE_ACCESSED)) !=
-	       (_KERNPG_TABLE & ~_PAGE_ACCESSED);
+	unsigned long ignore_flags = _PAGE_USER | _PAGE_NX | _PAGE_RW;
+
+	return (pmd_flags(pmd) & ~ignore_flags) != (_KERNPG_TABLE
+		& ~ignore_flags);
 }
 
 static inline unsigned long pages_to_mb(unsigned long npg)
@@ -856,7 +858,10 @@ static inline int pud_large(pud_t pud)
 
 static inline int pud_bad(pud_t pud)
 {
-	return (pud_flags(pud) & ~(_KERNPG_TABLE | _PAGE_USER)) != 0;
+	unsigned long ignore_flags = _KERNPG_TABLE | _PAGE_USER | _PAGE_NX
+		| _PAGE_RW;
+
+	return (pud_flags(pud) & ~ignore_flags) != 0;
 }
 #else
 #define pud_leaf	pud_large
@@ -890,7 +895,8 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
 
 static inline int p4d_bad(p4d_t p4d)
 {
-	unsigned long ignore_flags = _KERNPG_TABLE | _PAGE_USER;
+	unsigned long ignore_flags = _KERNPG_TABLE | _PAGE_USER | _PAGE_NX
+		| _PAGE_RW;
 
 	if (IS_ENABLED(CONFIG_PAGE_TABLE_ISOLATION))
 		ignore_flags |= _PAGE_NX;
@@ -933,7 +939,7 @@ static inline p4d_t *p4d_offset(pgd_t *pgd, unsigned long address)
 
 static inline int pgd_bad(pgd_t pgd)
 {
-	unsigned long ignore_flags = _PAGE_USER;
+	unsigned long ignore_flags = _PAGE_USER | _PAGE_NX | _PAGE_RW;
 
 	if (!pgtable_l5_enabled())
 		return 0;
@@ -941,7 +947,8 @@ static inline int pgd_bad(pgd_t pgd)
 	if (IS_ENABLED(CONFIG_PAGE_TABLE_ISOLATION))
 		ignore_flags |= _PAGE_NX;
 
-	return (pgd_flags(pgd) & ~ignore_flags) != _KERNPG_TABLE;
+	return (pgd_flags(pgd) & ~ignore_flags)
+		!= (_KERNPG_TABLE & ~ignore_flags);
 }
 
 static inline int pgd_none(pgd_t pgd)

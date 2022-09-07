@@ -4793,9 +4793,9 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 			page = virt_to_page(addr);
 			prep_new_page(page, order, gfp_mask, alloc_flags);
 		} else {
+			pr_err("compaction not successful %ld", (u64)addr);
 			BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
 		}
-
 	}
 #else
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
@@ -5836,17 +5836,50 @@ EXPORT_SYMBOL_GPL(__alloc_pages_bulk);
  * This is the 'heart' of the zoned buddy allocator.
  */
 #ifdef CONFIG_NVALLOC
-struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
-			   nodemask_t *nodemask)
+struct page *nvalloc_alloc_pages(gfp_t gfp, unsigned int order,
+				 unsigned int alloc_flags,
+				 const struct alloc_context *ac)
 {
 	int cpu;
 	u8 *addr;
-	struct page *page;
+
+	if (!populated_zone(ac->preferred_zoneref->zone))
+		return NULL;
+
+	cpu = get_cpu();
+	addr = nvalloc_get(ac->preferred_zoneref->zone->nvalloc, cpu, order);
+	put_cpu();
+	if (!nvalloc_err((u64)addr)) {
+		return virt_to_page(addr);
+	} else {
+		pr_err("nvalloc: get failure %llu o=%u (cpu=%d, zid=%d)",
+		       (u64)addr, order, cpu, ac->preferred_zoneref->zone_idx);
+		nvalloc_printk(ac->preferred_zoneref->zone->nvalloc);
+
+		if ((u64)addr == NVALLOC_ERROR_MEMORY && order > 0) {
+			struct page *page;
+			enum compact_result compact_result;
+			pr_info("nvalloc: memory compaction");
+			page = __alloc_pages_direct_compact(
+				gfp, order, alloc_flags, ac,
+				DEF_COMPACT_PRIORITY, &compact_result);
+			if (page)
+				return page;
+		} else {
+			VM_BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
+			   nodemask_t *nodemask)
+{
+	struct page *page = NULL;
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = {};
-
-	enum compact_result compact_result;
 
 	/*
 	 * There are several places where we assume that the order value is sane
@@ -5869,37 +5902,32 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 				 &alloc_gfp, &alloc_flags))
 		return NULL;
 
-	/* Assume nvalloc is already initialized */
-	if (WARN_ON_ONCE(ac.preferred_zoneref->zone->nvalloc == NULL))
-		return NULL;
-
-	/* First allocation attempt */
-	cpu = get_cpu();
-	addr = nvalloc_get(ac.preferred_zoneref->zone->nvalloc, cpu, order);
-	if (!nvalloc_err((u64)addr)) {
-		page = virt_to_page(addr);
-	} else {
-		put_cpu();
-		pr_err("nvalloc: get failure %llu o=%u (cpu=%d, zid=%d)",
-		       (u64)addr, order, cpu, ac.preferred_zoneref->zone_idx);
-
-		if ((u64)addr == NVALLOC_ERROR_MEMORY &&
-		    order > PAGE_ALLOC_COSTLY_ORDER) {
-			// TODO: call compaction more often
-			// (every time an internal realloc due to fragmentation is performed)
-			page = __alloc_pages_direct_compact(
-				gfp, order, alloc_flags, &ac,
-				DEF_COMPACT_PRIORITY, &compact_result);
-			preempt_disable();
-		} else {
-			VM_BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
-			return NULL;
+	page = nvalloc_alloc_pages(gfp, order, alloc_flags, &ac);
+	if (page == NULL) {
+		// fallback to next memory zones
+		struct zoneref *zone_ref;
+		struct zone *zone;
+		int skip_zid = ac.preferred_zoneref->zone_idx;
+		pr_warn("nvalloc: fallback to other zones");
+		for_each_zone_zonelist_nodemask(zone, zone_ref, ac.zonelist,
+						ac.highest_zoneidx,
+						ac.nodemask) {
+			if (zone_ref->zone_idx == skip_zid)
+				continue;
+			ac.preferred_zoneref = zone_ref;
+			page = nvalloc_alloc_pages(gfp, order, alloc_flags,
+						   &ac);
+			if (page != NULL)
+				break;
 		}
 	}
+	if (page == NULL)
+		return NULL;
+
+	preempt_disable();
 	__mod_zone_freepage_state(ac.preferred_zoneref->zone, -(1 << order),
 				  ac.migratetype);
-	put_cpu();
-
+	preempt_enable();
 	// from get_page_from_freelist
 	prep_new_page(page, order, gfp, alloc_flags);
 

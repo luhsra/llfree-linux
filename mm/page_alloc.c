@@ -159,6 +159,7 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 #define pcpu_task_unpin()	migrate_enable()
 #endif
 
+#ifndef CONFIG_NVALLOC
 /*
  * Generic helper to lookup and a per-cpu variable with an embedded spinlock.
  * Return value should be used with equivalent unlock helper.
@@ -220,6 +221,8 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 
 #define pcp_spin_unlock_irqrestore(ptr, flags)				\
 	pcpu_spin_unlock_irqrestore(lock, ptr, flags)
+#endif
+
 #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
 DEFINE_PER_CPU(int, numa_node);
 EXPORT_PER_CPU_SYMBOL(numa_node);
@@ -269,19 +272,40 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+#define CONFIG_NVALLOC_SIZE_COUNTERS
 #ifdef CONFIG_NVALLOC_SIZE_COUNTERS
+struct size_counters_o {
+	u64 count;
+	u64 time;
+	u64 square;
+};
+
 // Count different allocation sizes
 struct size_counters {
-	u64 c[2 * MAX_ORDER];
+	struct size_counters_o c[2][MAX_ORDER];
 	u64 bulk;
 };
 static DEFINE_PER_CPU(struct size_counters, size_counters);
+static int size_counters_active = false;
 
-static void size_counters_alloc(int order)
+static inline u64 size_counters_start() {
+	return size_counters_active ? ktime_get_ns() : 0;
+}
+
+static void size_counters_alloc(int order, u64 start)
 {
-	struct size_counters *sc = get_cpu_ptr(&size_counters);
-	sc->c[order] += 1;
-	put_cpu_ptr(sc);
+	if (size_counters_active && start > 0) {
+		u64 ns = ktime_get_ns() - start;
+		struct size_counters_o *sco;
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		BUG_ON(sc == NULL);
+		sco = &sc->c[0][order];
+		BUG_ON(sco == NULL);
+		sco->count += 1;
+		sco->time += ns;
+		sco->square += ns * ns;
+		put_cpu_ptr(sc);
+	}
 }
 static void size_counters_bulk_alloc(u64 inc)
 {
@@ -289,11 +313,20 @@ static void size_counters_bulk_alloc(u64 inc)
 	sc->bulk += inc;
 	put_cpu_ptr(sc);
 }
-static void size_counters_free(int order)
+static void size_counters_free(int order, u64 start)
 {
-	struct size_counters *sc = get_cpu_ptr(&size_counters);
-	sc->c[MAX_ORDER + order] += 1;
-	put_cpu_ptr(sc);
+	if (size_counters_active && start > 0) {
+		u64 ns = ktime_get_ns() - start;
+		struct size_counters_o *sco;
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		BUG_ON(sc == NULL);
+		sco = &sc->c[1][order];
+		BUG_ON(sco == NULL);
+		sco->count += 1;
+		sco->time += ns;
+		sco->square += ns * ns;
+		put_cpu_ptr(sc);
+	}
 }
 
 #define _check_ret(ret)                                        \
@@ -311,43 +344,41 @@ static ssize_t size_counters_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
 	char ops[] = { 'a', 'f' };
-	size_t cpu, len = 0;
+	size_t len = 0;
 
 	// csv header
-	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len, "CPU,op,bulk"));
-	for (size_t order = 0; order < MAX_ORDER && len < PAGE_SIZE; order++) {
-		len += _check_ret(
-			snprintf(buf + len, PAGE_SIZE - len, ",%lu", order));
-	}
-	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len, "\n"));
+	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len,
+				   "op,order,count,avg,std,bulk\n"));
 
 	// csv body
 	for (size_t o = 0; o < sizeof(ops) / sizeof(*ops); o++) {
-		for_each_possible_cpu(cpu) {
-			struct size_counters *sc =
-				per_cpu_ptr(&size_counters, cpu);
+		for (size_t order = 0; order < MAX_ORDER; order++) {
+			u64 count = 0;
+			u64 avg = 0;
+			u64 squared = 0;
+			u64 bulk = 0;
+			u64 std = 0;
+			size_t cpu;
 
-			len += _check_ret(snprintf(buf + len, PAGE_SIZE - len,
-						   "%lu,%c", cpu, ops[o]));
-
-			if (o == 0) {
-				len += _check_ret(snprintf(buf + len,
-							   PAGE_SIZE - len,
-							   ",%llu", sc->bulk));
-			} else {
-				len += _check_ret(snprintf(
-					buf + len, PAGE_SIZE - len, ",0"));
+			for_each_possible_cpu(cpu) {
+				struct size_counters *sc =
+					per_cpu_ptr(&size_counters, cpu);
+				struct size_counters_o *sco = &sc->c[o][order];
+				count += sco->count;
+				avg += sco->time;
+				squared += sco->square;
 			}
 
-			for (size_t order = 0;
-			     order < MAX_ORDER && len < PAGE_SIZE; order++) {
-				len += _check_ret(snprintf(
-					buf + len, PAGE_SIZE - len, ",%llu",
-					sc->c[o * MAX_ORDER + order]));
+			if (count > 0) {
+				avg /= count;
+				squared /= count;
+				std = int_sqrt64(squared - avg * avg);
 			}
 
 			len += _check_ret(
-				snprintf(buf + len, PAGE_SIZE - len, "\n"));
+				snprintf(buf + len, PAGE_SIZE - len,
+					 "%c,%lld,%lld,%lld,%lld,%lld\n", ops[o],
+					 order, count, avg, std, bulk));
 		}
 	}
 
@@ -384,17 +415,21 @@ static int __init size_counters_init()
 		pr_err("size_counters_obj group failed\n");
 		kobject_put(size_counters_obj);
 	}
+	size_counters_active = true;
 	return 0;
 }
 postcore_initcall(size_counters_init);
 #else
-static void size_counters_alloc(int order)
+static inline u64 size_counters_start() {
+	return 0
+}
+static void size_counters_alloc(int order, u64 ns)
 {
 }
 static void size_counters_bulk_alloc(u64 inc)
 {
 }
-static void size_counters_free(int order)
+static void size_counters_free(int order, u64 ns)
 {
 }
 #endif // CONFIG_NVALLOC_SIZE_COUNTERS
@@ -900,8 +935,7 @@ static inline bool pcp_allowed_order(unsigned int order)
 
 static inline void free_the_page(struct page *page, unsigned int order)
 {
-
-	if (!IS_ENABLED(CONFIG_NVALLOC) && pcp_allowed_order(order))	/* Via pcp? */
+	if (pcp_allowed_order(order))		/* Via pcp? */
 		free_unref_page(page, order);
 	else
 		__free_pages_ok(page, order, FPI_NONE);
@@ -1584,7 +1618,6 @@ static __always_inline bool free_pages_prepare(struct page *page,
 
 	trace_mm_page_free(page, order);
 	kmsan_free_page(page, order);
-	size_counters_free(order);
 
 	if (unlikely(PageHWPoison(page)) && !order) {
 		/*
@@ -1887,24 +1920,25 @@ void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
 static void __free_pages_ok(struct page *page, unsigned int order,
 			    fpi_t fpi_flags)
 {
-#ifndef CONFIG_NVALLOC
 	unsigned long flags;
-#endif
 	int migratetype;
 	unsigned long pfn = page_to_pfn(page);
 	struct zone *zone = page_zone(page);
+	u64 start = size_counters_start();
 
 	if (!free_pages_prepare(page, order, true, fpi_flags))
 		return;
 
 	migratetype = get_pfnblock_migratetype(page, pfn);
 
-#ifndef CONFIG_NVALLOC
+	// TODO: Can we rm this lock?
 	spin_lock_irqsave(&zone->lock, flags);
 	if (unlikely(has_isolate_pageblock(zone) ||
 		is_migrate_isolate(migratetype))) {
 		migratetype = get_pfnblock_migratetype(page, pfn);
 	}
+#ifdef CONFIG_NVALLOC
+	spin_unlock_irqrestore(&zone->lock, flags);
 #endif
 	__free_one_page(page, pfn, zone, order, migratetype, fpi_flags);
 #ifndef CONFIG_NVALLOC
@@ -1912,6 +1946,7 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 #endif
 
 	__count_vm_events(PGFREE, 1 << order);
+	size_counters_free(order, start);
 }
 
 void __free_pages_core(struct page *page, unsigned int order)
@@ -3080,8 +3115,6 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 	return -1;
 }
 
-#ifndef CONFIG_NVALLOC
-
 /*
  * Reserve a pageblock for exclusive use of high-order atomic allocations if
  * there are no empty page blocks that contain a page with a suitable order
@@ -3199,6 +3232,8 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 
 	return false;
 }
+
+#ifndef CONFIG_NVALLOC
 
 /*
  * Try finding a free buddy page on the fallback list and put it on the free
@@ -3904,9 +3939,7 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 	struct zone *zone = page_zone(page);
 
 	/* zone lock should be held when this function is called */
-#ifndef CONFIG_NVALLOC
 	lockdep_assert_held(&zone->lock);
-#endif
 
 	/* Return isolated page to tail of freelist. */
 	__free_one_page(page, page_to_pfn(page), zone, order, mt,
@@ -3923,7 +3956,6 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 	VM_BUG_ON(true);
 }
 #endif // CONFIG_NVALLOC
-#ifndef CONFIG_NVALLOC
 
 /*
  * Update NUMA hit/miss statistics
@@ -3950,6 +3982,8 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z,
 	__count_numa_events(z, local_stat, nr_account);
 #endif
 }
+
+#ifndef CONFIG_NVALLOC
 
 static __always_inline
 struct page *rmqueue_buddy(struct zone *preferred_zone, struct zone *zone,
@@ -4121,6 +4155,32 @@ out:
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
 	return page;
 }
+#else // CONFIG_NVALLOC
+
+/*
+ * Allocate a page from the given zone.
+ */
+static inline struct page *rmqueue(struct zone *preferred_zone,
+				   struct zone *zone, unsigned int order,
+				   gfp_t gfp_flags, unsigned int alloc_flags,
+				   int migratetype)
+{
+	struct page *page;
+	int cpu = get_cpu();
+	u8 *addr = nvalloc_get(zone->nvalloc, cpu, order);
+
+	if (nvalloc_err((u64)addr)) {
+		BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+		put_cpu();
+		return NULL;
+	}
+	page = virt_to_page(addr);
+	__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
+	zone_statistics(preferred_zone, zone, 1);
+	put_cpu();
+
+	return virt_to_page(addr);
+}
 
 #endif // CONFIG_NVALLOC
 
@@ -4269,7 +4329,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		return false;
 
 	/* If this is an order-0 request then the watermark is fine */
-	if (!order)
+	if (!order || IS_ENABLED(CONFIG_NVALLOC))
 		return true;
 
 	/* For a high-order request, check at least one suitable page is free */
@@ -4426,8 +4486,6 @@ static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
 	return alloc_flags;
 }
 
-#ifndef CONFIG_NVALLOC
-
 /*
  * get_page_from_freelist goes through the zonelist trying to allocate
  * a page.
@@ -4583,8 +4641,6 @@ try_this_zone:
 	return NULL;
 }
 
-#endif // CONFIG_NVALLOC
-
 static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 {
 	unsigned int filter = SHOW_MEM_FILTER_NODES;
@@ -4628,8 +4684,6 @@ void warn_alloc(gfp_t gfp_mask, nodemask_t *nodemask, const char *fmt, ...)
 	dump_stack();
 	warn_alloc_show_mem(gfp_mask, nodemask);
 }
-
-#ifndef CONFIG_NVALLOC
 
 static inline struct page *
 __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
@@ -4738,8 +4792,6 @@ out:
 	return page;
 }
 
-#endif // CONFIG_NVALLOC
-
 /*
  * Maximum number of compaction retries with a progress before OOM
  * killer is consider as the only way to move forward.
@@ -4785,21 +4837,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 	/* Try get a page from the freelist if available */
 	if (!page)
-#ifdef CONFIG_NVALLOC
-	{
-		u8 *addr = nvalloc_get(ac->preferred_zoneref->zone->nvalloc, get_cpu(), order);
-		put_cpu();
-		if (!nvalloc_err((u64)addr)) {
-			page = virt_to_page(addr);
-			prep_new_page(page, order, gfp_mask, alloc_flags);
-		} else {
-			pr_err("compaction not successful %ld", (u64)addr);
-			BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
-		}
-	}
-#else
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
-#endif
 
 	if (page) {
 		struct zone *zone = page_zone(page);
@@ -5022,8 +5060,6 @@ static unsigned int check_retry_zonelist(unsigned int seq)
 	return seq;
 }
 
-#ifndef CONFIG_NVALLOC
-
 /* Perform direct synchronous page reclaim */
 static unsigned long
 __perform_reclaim(gfp_t gfp_mask, unsigned int order,
@@ -5146,8 +5182,6 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 	return alloc_flags;
 }
 
-#endif // CONFIG_NVALLOC
-
 static bool oom_reserves_allowed(struct task_struct *tsk)
 {
 	if (!tsk_is_oom_victim(tsk))
@@ -5189,8 +5223,6 @@ bool gfp_pfmemalloc_allowed(gfp_t gfp_mask)
 {
 	return !!__gfp_pfmemalloc_flags(gfp_mask);
 }
-
-#ifndef CONFIG_NVALLOC
 
 /*
  * Checks whether it makes sense to retry the reclaim to make a forward progress
@@ -5591,8 +5623,6 @@ got_pg:
 	return page;
 }
 
-#endif // CONFIG_NVALLOC
-
 static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		int preferred_nid, nodemask_t *nodemask,
 		struct alloc_context *ac, gfp_t *alloc_gfp,
@@ -5835,114 +5865,6 @@ EXPORT_SYMBOL_GPL(__alloc_pages_bulk);
 /*
  * This is the 'heart' of the zoned buddy allocator.
  */
-#ifdef CONFIG_NVALLOC
-struct page *nvalloc_alloc_pages(gfp_t gfp, unsigned int order,
-				 unsigned int alloc_flags,
-				 const struct alloc_context *ac)
-{
-	int cpu;
-	u8 *addr;
-
-	if (!populated_zone(ac->preferred_zoneref->zone))
-		return NULL;
-
-	cpu = get_cpu();
-	addr = nvalloc_get(ac->preferred_zoneref->zone->nvalloc, cpu, order);
-	put_cpu();
-	if (!nvalloc_err((u64)addr)) {
-		return virt_to_page(addr);
-	} else {
-		pr_err("nvalloc: get failure %llu o=%u (cpu=%d, zid=%d)",
-		       (u64)addr, order, cpu, ac->preferred_zoneref->zone_idx);
-		nvalloc_printk(ac->preferred_zoneref->zone->nvalloc);
-
-		if ((u64)addr == NVALLOC_ERROR_MEMORY && order > 0) {
-			struct page *page;
-			enum compact_result compact_result;
-			pr_info("nvalloc: memory compaction");
-			page = __alloc_pages_direct_compact(
-				gfp, order, alloc_flags, ac,
-				DEF_COMPACT_PRIORITY, &compact_result);
-			if (page)
-				return page;
-		} else {
-			VM_BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
-			return NULL;
-		}
-	}
-	return NULL;
-}
-
-struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
-			   nodemask_t *nodemask)
-{
-	struct page *page = NULL;
-	unsigned int alloc_flags = ALLOC_WMARK_LOW;
-	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
-	struct alloc_context ac = {};
-
-	/*
-	 * There are several places where we assume that the order value is sane
-	 * so bail out early if the request is out of bound.
-	 */
-	if (WARN_ON_ONCE_GFP(order >= MAX_ORDER, gfp))
-		return NULL;
-
-	gfp &= gfp_allowed_mask;
-	/*
-	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS
-	 * resp. GFP_NOIO which has to be inherited for all allocation requests
-	 * from a particular context which has been marked by
-	 * memalloc_no{fs,io}_{save,restore}. And PF_MEMALLOC_PIN which ensures
-	 * movable zones are not used during allocation.
-	 */
-	gfp = current_gfp_context(gfp);
-	alloc_gfp = gfp;
-	if (!prepare_alloc_pages(gfp, order, preferred_nid, nodemask, &ac,
-				 &alloc_gfp, &alloc_flags))
-		return NULL;
-
-	page = nvalloc_alloc_pages(gfp, order, alloc_flags, &ac);
-	if (page == NULL) {
-		// fallback to next memory zones
-		struct zoneref *zone_ref;
-		struct zone *zone;
-		int skip_zid = ac.preferred_zoneref->zone_idx;
-		pr_warn("nvalloc: fallback to other zones");
-		for_each_zone_zonelist_nodemask(zone, zone_ref, ac.zonelist,
-						ac.highest_zoneidx,
-						ac.nodemask) {
-			if (zone_ref->zone_idx == skip_zid)
-				continue;
-			ac.preferred_zoneref = zone_ref;
-			page = nvalloc_alloc_pages(gfp, order, alloc_flags,
-						   &ac);
-			if (page != NULL)
-				break;
-		}
-	}
-	if (page == NULL)
-		return NULL;
-
-	preempt_disable();
-	__mod_zone_freepage_state(ac.preferred_zoneref->zone, -(1 << order),
-				  ac.migratetype);
-	preempt_enable();
-	// from get_page_from_freelist
-	prep_new_page(page, order, gfp, alloc_flags);
-
-	if (memcg_kmem_enabled() && (gfp & __GFP_ACCOUNT) && page &&
-	    unlikely(__memcg_kmem_charge_page(page, gfp, order) != 0)) {
-		__free_pages(page, order);
-		page = NULL;
-	}
-
-	trace_mm_page_alloc(page, order, alloc_gfp, ac.migratetype);
-	size_counters_alloc(order);
-
-	return page;
-}
-#else // CONFIG_NVALLOC
 struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 							nodemask_t *nodemask)
 {
@@ -5950,6 +5872,8 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	gfp_t alloc_gfp; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
+
+	u64 start = size_counters_start();
 
 	/*
 	 * There are several places where we assume that the order value is sane
@@ -6003,11 +5927,10 @@ out:
 
 	trace_mm_page_alloc(page, order, alloc_gfp, ac.migratetype);
 	kmsan_alloc_page(page, order, alloc_gfp);
-	size_counters_alloc(order);
+	size_counters_alloc(order, start);
 
 	return page;
 }
-#endif // CONFIG_NVALLOC
 EXPORT_SYMBOL(__alloc_pages);
 
 struct folio *__folio_alloc(gfp_t gfp, unsigned int order, int preferred_nid,

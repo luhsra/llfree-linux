@@ -30,7 +30,7 @@ extern "C" {
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = ArrayList<Atom<128>>;
+type Allocator = ArrayList<3, Atom<128>>;
 
 #[repr(C)]
 pub struct ZoneInfo {

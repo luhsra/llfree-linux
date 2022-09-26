@@ -271,7 +271,6 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
-#define CONFIG_NVALLOC_SIZE_COUNTERS
 #ifdef CONFIG_NVALLOC_SIZE_COUNTERS
 struct size_counters_o {
 	u64 count;
@@ -420,7 +419,7 @@ static int __init size_counters_init()
 postcore_initcall(size_counters_init);
 #else
 static inline u64 size_counters_start() {
-	return 0
+	return 0;
 }
 static void size_counters_alloc(int order, u64 ns)
 {
@@ -1281,15 +1280,22 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	// migratetype: ?
 	// fpi_flags: buddy alloc specific (free notifications, list opt, kasan poisioning)
 	u64 ret, cpu;
+	struct capture_control *capc = task_capc(zone);
 
 	VM_BUG_ON(zone->nvalloc == NULL);
 
 	cpu = get_cpu();
-	__mod_zone_freepage_state(zone, 1 << order, migratetype);
+	if (likely(!is_migrate_isolate(migratetype)) &&
+	    !compaction_capture(capc, page, order, migratetype))
+		__mod_zone_freepage_state(zone, 1 << order, migratetype);
+
 	ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
 	put_cpu();
 
-	VM_BUG_ON_PAGE(ret != 0, page);
+	if (ret != 0) {
+		pr_err("nvalloc: err %lld", ret);
+		VM_BUG_ON_PAGE(true, page);
+	}
 
 	/* Notify page reporting subsystem of freed page */
 	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
@@ -1922,14 +1928,20 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	migratetype = get_pfnblock_migratetype(page, pfn);
 
 	// TODO: Can we rm this lock?
+#ifndef CONFIG_NVALLOC
 	spin_lock_irqsave(&zone->lock, flags);
-	if (unlikely(has_isolate_pageblock(zone) ||
-		is_migrate_isolate(migratetype))) {
-		migratetype = get_pfnblock_migratetype(page, pfn);
-	}
-#ifdef CONFIG_NVALLOC
-	spin_unlock_irqrestore(&zone->lock, flags);
 #endif
+	if (unlikely(has_isolate_pageblock(zone) ||
+		     is_migrate_isolate(migratetype))) {
+#ifdef CONFIG_NVALLOC
+		spin_lock_irqsave(&zone->lock, flags);
+		migratetype = get_pfnblock_migratetype(page, pfn);
+		spin_unlock_irqrestore(&zone->lock, flags);
+#else
+		migratetype = get_pfnblock_migratetype(page, pfn);
+#endif // CONFIG_NVALLOC
+	}
+
 	__free_one_page(page, pfn, zone, order, migratetype, fpi_flags);
 #ifndef CONFIG_NVALLOC
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -4160,21 +4172,30 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 				   gfp_t gfp_flags, unsigned int alloc_flags,
 				   int migratetype)
 {
-	struct page *page;
+	struct page *page = NULL;
 	int cpu = get_cpu();
 	u8 *addr = nvalloc_get(zone->nvalloc, cpu, order);
 
 	if (nvalloc_err((u64)addr)) {
-		BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
 		put_cpu();
-		return NULL;
+		pr_err("nvalloc: err %lld", (u64)addr);
+		BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+	} else {
+		page = virt_to_page(addr);
+		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
+		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
+		zone_statistics(preferred_zone, zone, 1);
+		put_cpu();
 	}
-	page = virt_to_page(addr);
-	__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
-	zone_statistics(preferred_zone, zone, 1);
-	put_cpu();
 
-	return virt_to_page(addr);
+	/* Separate test+clear to avoid unnecessary atomics */
+	if (unlikely(test_bit(ZONE_BOOSTED_WATERMARK, &zone->flags))) {
+		clear_bit(ZONE_BOOSTED_WATERMARK, &zone->flags);
+		wakeup_kswapd(zone, 0, 0, zone_idx(zone));
+	}
+
+	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
+	return page;
 }
 
 #endif // CONFIG_NVALLOC
@@ -4597,6 +4618,7 @@ retry:
 		}
 
 try_this_zone:
+		// TODO: Infinite loop on failed allocation!
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {

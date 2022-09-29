@@ -16,9 +16,9 @@ MODULE_AUTHOR("Lars Wrenger");
 // Functions needed by the allocator
 
 /// Linux provided alloc function
-u8 *nvalloc_linux_alloc(u64 size, u64 align)
+u8 *nvalloc_linux_alloc(u64 node, u64 size, u64 align)
 {
-	return memblock_alloc(size, align);
+	return memblock_alloc_node(size, align, node);
 }
 /// Linux provided free function
 void nvalloc_linux_free(u8 *ptr, u64 size, u64 align)

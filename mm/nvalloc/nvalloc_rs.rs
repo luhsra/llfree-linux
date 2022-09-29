@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
 
@@ -8,14 +9,14 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ffi::{c_char, c_void};
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;
-use core::sync::atomic::{self, Ordering};
+use core::sync::atomic::{self, AtomicU64, Ordering};
 
 use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
 use nvalloc::lower::Atom;
 use nvalloc::table::PT_LEN;
-use nvalloc::upper::{Alloc, ArrayList};
+use nvalloc::upper::{Alloc, Array};
 use nvalloc::util::{div_ceil, Page};
 use nvalloc::Error;
 
@@ -23,28 +24,25 @@ const MOD: &[u8] = b"nvalloc\0";
 
 extern "C" {
     /// Linux provided alloc function
-    fn nvalloc_linux_alloc(size: u64, align: u64) -> *mut u8;
+    fn nvalloc_linux_alloc(node: u64, size: u64, align: u64) -> *mut u8;
     /// Linux provided free function
     fn nvalloc_linux_free(ptr: *mut u8, size: u64, align: u64);
     /// Linux provided printk function
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = ArrayList<3, Atom<128>>;
+type Allocator = Array<3, Atom<128>>;
 
-#[repr(C)]
-pub struct ZoneInfo {
-    skip: u8,
-    persistent: u8,
-    start: *mut c_void,
-    pages: u64,
-}
+static NODE_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Initialize the allocator for the given memory range.
 /// If `overwrite` is nonzero no existing allocator state is recovered.
 /// Returns 0 on success or an error code.
+#[cold]
+#[link_section = ".init.text"]
 #[no_mangle]
 pub extern "C" fn nvalloc_init(
+    node: u64,
     cores: u32,
     persistent: u8,
     start: *mut c_void,
@@ -56,6 +54,9 @@ pub extern "C" fn nvalloc_init(
 
     let persistent = persistent != 0;
     assert!(!persistent, "Currently not supported!");
+
+    // Set zone id for allocations
+    NODE_ID.store(node, Ordering::Release);
 
     let mut alloc = Box::new(Allocator::default());
     if pages > 0 {
@@ -78,6 +79,7 @@ pub extern "C" fn nvalloc_init(
 }
 
 /// Shut down the allocator normally.
+#[cold]
 #[no_mangle]
 pub extern "C" fn nvalloc_uninit(alloc: *mut Allocator) {
     if !alloc.is_null() {
@@ -125,6 +127,7 @@ pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order:
     }
 }
 
+#[cold]
 #[no_mangle]
 pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
@@ -134,6 +137,7 @@ pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
     }
 }
 
+#[cold]
 #[no_mangle]
 pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
@@ -143,6 +147,7 @@ pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
 
 /// # Safety
 /// This writes into the provided memory buffer which has to be valid.
+#[cold]
 #[no_mangle]
 pub extern "C" fn nvalloc_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
@@ -158,10 +163,16 @@ pub extern "C" fn nvalloc_dump(alloc: *const Allocator, buf: *mut u8, len: u64) 
 
 struct LinuxAlloc;
 unsafe impl GlobalAlloc for LinuxAlloc {
+    #[cold]
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        nvalloc_linux_alloc(layout.size() as _, layout.align() as _)
+        nvalloc_linux_alloc(
+            NODE_ID.load(Ordering::Acquire),
+            layout.size() as _,
+            layout.align() as _,
+        )
     }
 
+    #[cold]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
         nvalloc_linux_free(ptr, layout.size() as _, layout.align() as _);
     }

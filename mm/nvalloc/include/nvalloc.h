@@ -16,7 +16,7 @@ enum nvalloc_error_t {
 
 /// Initialize the allocator for the given memory range.
 /// Returns 0 on success or an error code.
-void *nvalloc_init(u32 cores, u8 persistent, void *start, u64 pages);
+void *nvalloc_init(u64 node, u32 cores, u8 persistent, void *start, u64 pages);
 /// Uninitialize the allocator
 void nvalloc_uninit(void *alloc);
 

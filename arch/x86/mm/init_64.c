@@ -1340,7 +1340,7 @@ void mem_init_nvalloc(void)
 		void *nvalloc;
 
 		pr_info("nvalloc: init on %u cpus", num_possible_cpus());
-		nvalloc = nvalloc_init(num_possible_cpus(), false,
+		nvalloc = nvalloc_init(zone->node, num_possible_cpus(), false,
 				       pfn_to_kaddr(zone->zone_start_pfn),
 				       zone->spanned_pages);
 		if (nvalloc_err((u64)nvalloc)) {

@@ -1243,6 +1243,39 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 	return find_buddy_page_pfn(higher_page, higher_page_pfn, order + 1,
 			NULL) != NULL;
 }
+#else
+/* Used for pages not on another list */
+static inline void add_to_free_list(struct page *page, struct zone *zone,
+				    unsigned int order, int migratetype)
+{
+	u64 cpu = get_cpu();
+	u64 ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
+	put_cpu();
+	if (ret != 0) {
+		pr_err("nvalloc: err %lld", ret);
+		VM_BUG_ON_PAGE(true, page);
+	}
+}
+
+static inline void del_page_from_free_list(struct page *page, struct zone *zone,
+					   unsigned int order)
+{
+	u64 ret, cpu;
+	/* clear reported state and update reported page count */
+	if (page_reported(page))
+		__ClearPageReported(page);
+
+	cpu = get_cpu();
+	ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
+	put_cpu();
+	if (ret != 0) {
+		pr_err("nvalloc: err %lld", ret);
+		VM_BUG_ON_PAGE(true, page);
+	}
+
+	__ClearPageBuddy(page);
+	set_page_private(page, 0);
+}
 
 #endif // CONFIG_NVALLOC
 

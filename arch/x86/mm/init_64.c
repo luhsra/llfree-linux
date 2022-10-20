@@ -1331,7 +1331,7 @@ failed:
 
 #ifdef CONFIG_NVALLOC
 
-void mem_init_nvalloc(void)
+void __init mem_init_nvalloc(void)
 {
 	struct zone *zone;
 

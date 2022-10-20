@@ -11,6 +11,7 @@ rustflags = [
         "-Zbinary_dep_depinfo=y",
         "-Zfunction-sections=n",
         "-Ztune-cpu=generic",
+        "--emit=dep-info,obj",
 ]
 
 [unstable]

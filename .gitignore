@@ -165,3 +165,9 @@ sphinx_*/
 
 # cHash
 *.lmap
+
+
+# Custom
+*.old
+/build-vm/
+/build-deb/

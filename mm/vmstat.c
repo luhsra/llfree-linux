@@ -1064,6 +1064,7 @@ static void fill_contig_page_info(struct zone *zone,
 		 * Access to nr_free is lockless as nr_free is used only for
 		 * diagnostic purposes. Use data_race to avoid KCSAN warning.
 		 */
+		// FIXME: Another access to the allocator free lists...
 		blocks = data_race(zone->free_area[order].nr_free);
 		info->free_blocks_total += blocks;
 

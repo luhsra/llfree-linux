@@ -170,3 +170,9 @@ sphinx_*/
 /rust-project.json
 # cHash
 *.lmap
+
+
+# Custom
+*.old
+/build-vm/
+/build-deb/

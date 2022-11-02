@@ -14,7 +14,7 @@ use core::sync::atomic::{self, AtomicU64, Ordering};
 use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
-use nvalloc::lower::Atom;
+use nvalloc::lower::Cache;
 use nvalloc::table::PT_LEN;
 use nvalloc::upper::{Alloc, Array};
 use nvalloc::util::{div_ceil, Page};
@@ -31,7 +31,7 @@ extern "C" {
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = Array<3, Atom<128>>;
+type Allocator = Array<3, Cache<128>>;
 
 static NODE_ID: AtomicU64 = AtomicU64::new(0);
 

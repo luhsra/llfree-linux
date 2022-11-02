@@ -1638,7 +1638,7 @@ static void kernel_init_pages(struct page *page, int numpages)
 	kasan_enable_current();
 }
 
-static __always_inline bool free_pages_prepare(struct page *page,
+static bool free_pages_prepare(struct page *page,
 			unsigned int order, bool check_free, fpi_t fpi_flags)
 {
 	int bad = 0;
@@ -1949,7 +1949,7 @@ void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
 static void __free_pages_ok(struct page *page, unsigned int order,
 			    fpi_t fpi_flags)
 {
-	unsigned long flags;
+	__maybe_unused unsigned long flags;
 	int migratetype;
 	unsigned long pfn = page_to_pfn(page);
 	struct zone *zone = page_zone(page);
@@ -1960,21 +1960,21 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 
 	migratetype = get_pfnblock_migratetype(page, pfn);
 
-	// TODO: Can we rm this lock?
+	// TODO: why is this called twice?
 #ifndef CONFIG_NVALLOC
 	spin_lock_irqsave(&zone->lock, flags);
-#endif
 	if (unlikely(has_isolate_pageblock(zone) ||
 		     is_migrate_isolate(migratetype))) {
-#ifdef CONFIG_NVALLOC
+		migratetype = get_pfnblock_migratetype(page, pfn);
+	}
+#else
+	if (unlikely(has_isolate_pageblock(zone) ||
+		     is_migrate_isolate(migratetype))) {
 		spin_lock_irqsave(&zone->lock, flags);
 		migratetype = get_pfnblock_migratetype(page, pfn);
 		spin_unlock_irqrestore(&zone->lock, flags);
-#else
-		migratetype = get_pfnblock_migratetype(page, pfn);
-#endif // CONFIG_NVALLOC
 	}
-
+#endif
 	__free_one_page(page, pfn, zone, order, migratetype, fpi_flags);
 #ifndef CONFIG_NVALLOC
 	spin_unlock_irqrestore(&zone->lock, flags);
@@ -3153,6 +3153,7 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 	return -1;
 }
 
+#ifndef CONFIG_NVALLOC
 /*
  * Reserve a pageblock for exclusive use of high-order atomic allocations if
  * there are no empty page blocks that contain a page with a suitable order
@@ -3270,6 +3271,7 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 
 	return false;
 }
+#endif // CONFIG_NVALLOC
 
 #ifndef CONFIG_NVALLOC
 
@@ -4661,8 +4663,10 @@ try_this_zone:
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
+#ifndef CONFIG_NVALLOC
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
+#endif
 
 			return page;
 		} else {
@@ -5157,7 +5161,9 @@ retry:
 	 * Shrink them and try again
 	 */
 	if (!page && !drained) {
+#ifndef CONFIG_NVALLOC
 		unreserve_highatomic_pageblock(ac, false);
+#endif
 		drain_all_pages(NULL);
 		drained = true;
 		goto retry;
@@ -5304,10 +5310,12 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 * Make sure we converge to OOM if we cannot make any progress
 	 * several times in the row.
 	 */
+#ifndef CONFIG_NVALLOC
 	if (*no_progress_loops > MAX_RECLAIM_RETRIES) {
 		/* Before OOM, exhaust highatomic_reserve */
 		return unreserve_highatomic_pageblock(ac, true);
 	}
+#endif
 
 	/*
 	 * Keep reclaiming pages while there is a chance this will lead

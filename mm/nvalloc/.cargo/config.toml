@@ -3,6 +3,7 @@ target = "x86_64-linux.json"
 rustflags = [
         "-Ccode-model=kernel",
         "-Cembed-bitcode=n",
+        "-Cforce-frame-pointers=y",
         "-Cforce-unwind-tables=n",
         "-Cno-redzone=y",
         "-Crelocation-model=static",

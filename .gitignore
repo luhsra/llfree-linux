@@ -174,5 +174,3 @@ sphinx_*/
 
 # Custom
 *.old
-/build-vm/
-/build-deb/

@@ -5,7 +5,8 @@ nvalloc-objs := nvalloc_c.o nvalloc_rs.o
 nvalloc-a := mm/nvalloc/target/x86_64-linux/release/libnvalloc_module.a
 
 $(nvalloc-a):
-	cd mm/nvalloc && cargo build -r
+	cd $(srctree)/mm/nvalloc && CARGO_TARGET_DIR=$(abs_objtree)/mm/nvalloc/target cargo build -r
+	cd $(abs_objtree)
 
 mm/nvalloc/nvalloc_rs.o: $(nvalloc-a)
 	ld.lld -r -m elf_x86_64 --thinlto-jobs=4 --whole-archive $^ -o $@

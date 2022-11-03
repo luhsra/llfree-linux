@@ -7,7 +7,7 @@ First enable the `CONFIG_NVALLOC` option (`make LLVM=1 menuconfig`). It is curre
 Then the Kernel can be build as usual (with llvm):
 
 ```sh
-make LLVM=1 #...
+make O=build-nvalloc-vm LLVM=1 #...
 ```
 
 ## Structure
@@ -40,4 +40,3 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 ```
 
 > Logging is automatically initialized with the allocator.
-

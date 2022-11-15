@@ -29,6 +29,8 @@ u64 nvalloc_is_free(void *alloc, u8 *addr, u32 order);
 
 /// Debug: Return number of free pages.
 u64 nvalloc_free_count(void *alloc);
+/// Debug: Return number of free huge pages.
+u64 nvalloc_free_huge_count(void *alloc);
 /// Debug: KPrint the allocator state
 void nvalloc_printk(void *alloc);
 /// Debug: Print allocator state to the given buffer

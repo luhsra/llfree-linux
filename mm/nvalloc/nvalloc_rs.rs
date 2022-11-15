@@ -16,7 +16,8 @@ use log::{error, warn, Level, Metadata, Record};
 
 use nvalloc::lower::Cache;
 use nvalloc::table::PT_LEN;
-use nvalloc::upper::{Alloc, Array};
+use nvalloc::upper::Persistency::Volatile;
+use nvalloc::upper::{Alloc, AllocNew, Array};
 use nvalloc::util::{div_ceil, Page};
 use nvalloc::Error;
 
@@ -31,7 +32,7 @@ extern "C" {
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = Array<3, Cache<128>>;
+type Allocator = Array<3, Cache<32>>;
 
 static NODE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -58,21 +59,21 @@ pub extern "C" fn nvalloc_init(
     // Set zone id for allocations
     NODE_ID.store(node, Ordering::Release);
 
-    let mut alloc = Box::new(Allocator::default());
     if pages > 0 {
         let aligned = nvalloc::util::align_down(start as usize, Page::SIZE * PT_LEN) as *mut c_void;
         let offset = div_ceil(start as usize - aligned as usize, Page::SIZE);
 
         let memory =
             unsafe { core::slice::from_raw_parts_mut(aligned.cast(), pages as usize + offset) };
-        if let Err(e) = alloc
-            .init(cores as _, memory, persistent)
-            .and_then(|_| alloc.reserve_all())
-        {
-            return e as usize as _;
+
+        match Allocator::new(cores as _, memory, Volatile, false) {
+            Ok(alloc) => {
+                warn!("setup mem={:?} ({})", memory.as_ptr_range(), alloc.pages());
+                // Move to newly allocated memory and leak address
+                Box::leak(Box::new(alloc)) as *mut Allocator as _
+            }
+            Err(e) => e as usize as _,
         }
-        warn!("setup mem={:?} ({})", memory.as_ptr_range(), alloc.pages());
-        Box::leak(alloc) as *mut Allocator as _
     } else {
         Error::Initialization as usize as _
     }
@@ -132,6 +133,16 @@ pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order:
 pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.dbg_free_pages() as u64
+    } else {
+        0
+    }
+}
+
+#[cold]
+#[no_mangle]
+pub extern "C" fn nvalloc_free_huge_count(alloc: *const Allocator) -> u64 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.dbg_free_huge_pages() as u64
     } else {
         0
     }

@@ -103,5 +103,10 @@ static void nvalloc_cleanup_module(void)
 	pr_info("uninit\n");
 }
 
+EXPORT_SYMBOL(nvalloc_free_count);
+EXPORT_SYMBOL(nvalloc_free_huge_count);
+EXPORT_SYMBOL(nvalloc_dump);
+EXPORT_SYMBOL(nvalloc_printk);
+
 module_init(nvalloc_init_module);
 module_exit(nvalloc_cleanup_module);

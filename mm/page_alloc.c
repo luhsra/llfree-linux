@@ -15,6 +15,7 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
+#include "linux/gfp_types.h"
 #include <nvalloc.h>
 
 #include <linux/stddef.h>
@@ -280,8 +281,8 @@ struct size_counters_o {
 
 // Count different allocation sizes
 struct size_counters {
-	struct size_counters_o c[2][MAX_ORDER];
-	u64 bulk;
+	struct size_counters_o c[3][MAX_ORDER];
+	u64 bulk[3];
 };
 static DEFINE_PER_CPU(struct size_counters, size_counters);
 static int size_counters_active = false;
@@ -290,39 +291,57 @@ static inline u64 size_counters_start() {
 	return size_counters_active ? ktime_get_ns() : 0;
 }
 
-static void size_counters_alloc(int order, u64 start)
+static void size_counters_alloc(gfp_t flags, int order, u64 start)
 {
 	if (size_counters_active && start > 0) {
-		u64 ns = ktime_get_ns() - start;
+		u64 ns = start == 0 ? 0 : ktime_get_ns() - start;
 		struct size_counters_o *sco;
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		BUG_ON(sc == NULL);
-		sco = &sc->c[0][order];
+		sco = flags & ___GFP_SC_USER ? &sc->c[1][order] :
+					       &sc->c[0][order];
 		BUG_ON(sco == NULL);
+		if (ns == 0 && sco->count != 0)
+			ns = sco->time / sco->count;
 		sco->count += 1;
 		sco->time += ns;
 		sco->square += ns * ns;
 		put_cpu_ptr(sc);
 	}
 }
-static void size_counters_bulk_alloc(u64 inc)
+static void size_counters_bulk_alloc(gfp_t flags, u64 inc)
 {
-	struct size_counters *sc = get_cpu_ptr(&size_counters);
-	sc->bulk += inc;
-	put_cpu_ptr(sc);
+	if (size_counters_active) {
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		if (flags & ___GFP_SC_USER)
+			sc->bulk[1] += inc;
+		else
+			sc->bulk[0] += inc;
+		put_cpu_ptr(sc);
+	}
 }
 static void size_counters_free(int order, u64 start)
 {
-	if (size_counters_active && start > 0) {
-		u64 ns = ktime_get_ns() - start;
+	if (size_counters_active) {
+		u64 ns = start == 0 ? 0 : ktime_get_ns() - start;
 		struct size_counters_o *sco;
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		BUG_ON(sc == NULL);
-		sco = &sc->c[1][order];
+		sco = &sc->c[2][order];
 		BUG_ON(sco == NULL);
+		if (ns == 0 && sco->count != 0)
+			ns = sco->time / sco->count;
 		sco->count += 1;
 		sco->time += ns;
 		sco->square += ns * ns;
+		put_cpu_ptr(sc);
+	}
+}
+
+static void size_counters_bulk_free(u64 inc) {
+	if (size_counters_active) {
+		struct size_counters *sc = get_cpu_ptr(&size_counters);
+		sc->bulk[2] += inc;
 		put_cpu_ptr(sc);
 	}
 }
@@ -341,7 +360,7 @@ static void size_counters_free(int order, u64 start)
 static ssize_t size_counters_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
-	char ops[] = { 'a', 'f' };
+	char ops[] = { 'a', 'u', 'f' };
 	size_t len = 0;
 
 	// csv header
@@ -365,11 +384,14 @@ static ssize_t size_counters_show(struct kobject *kobj,
 				count += sco->count;
 				avg += sco->time;
 				squared += sco->square;
+				if (order == 0)
+					bulk += sc->bulk[o];
 			}
 
 			if (count > 0) {
 				avg /= count;
 				squared /= count;
+				// standard deviation
 				std = int_sqrt64(squared - avg * avg);
 			}
 
@@ -421,10 +443,10 @@ postcore_initcall(size_counters_init);
 static inline u64 size_counters_start() {
 	return 0;
 }
-static void size_counters_alloc(int order, u64 ns)
+static void size_counters_alloc(gfp_t flags, int order, u64 ns)
 {
 }
-static void size_counters_bulk_alloc(u64 inc)
+static void size_counters_bulk_alloc(gfp_t flags, u64 inc)
 {
 }
 static void size_counters_free(int order, u64 ns)
@@ -3779,6 +3801,7 @@ void free_unref_page(struct page *page, unsigned int order)
 	struct zone *zone;
 	unsigned long pfn = page_to_pfn(page);
 	int migratetype;
+	u64 start = size_counters_start();
 
 	if (!free_unref_page_prepare(page, pfn, order))
 		return;
@@ -3804,6 +3827,7 @@ void free_unref_page(struct page *page, unsigned int order)
 	pcp = pcp_spin_trylock_irqsave(zone->per_cpu_pageset, flags);
 	if (pcp) {
 		free_unref_page_commit(zone, pcp, page, migratetype, order);
+		size_counters_free(order, start);
 		pcp_spin_unlock_irqrestore(pcp, flags);
 	} else {
 		free_one_page(zone, page, pfn, order, migratetype, FPI_NONE);
@@ -3822,6 +3846,7 @@ void free_unref_page_list(struct list_head *list)
 	unsigned long flags;
 	int batch_count = 0;
 	int migratetype;
+	int count = 0;
 
 	/* Prepare pages for freeing */
 	list_for_each_entry_safe(page, next, list, lru) {
@@ -3875,7 +3900,9 @@ void free_unref_page_list(struct list_head *list)
 			batch_count = 0;
 			pcp = pcp_spin_lock_irqsave(locked_zone->per_cpu_pageset, flags);
 		}
+		count += 1;
 	}
+	size_counters_bulk_free(count);
 
 	if (pcp)
 		pcp_spin_unlock_irqrestore(pcp, flags);
@@ -5894,7 +5921,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	__count_zid_vm_events(PGALLOC, zone_idx(zone), nr_account);
 	zone_statistics(ac.preferred_zoneref->zone, zone, nr_account);
 
-	size_counters_bulk_alloc(nr_populated);
+	size_counters_bulk_alloc(gfp, nr_populated);
 out:
 	return nr_populated;
 
@@ -5980,7 +6007,7 @@ out:
 	}
 
 	trace_mm_page_alloc(page, order, alloc_gfp, ac.migratetype);
-	size_counters_alloc(order, start);
+	size_counters_alloc(gfp, order, start);
 
 	return page;
 }

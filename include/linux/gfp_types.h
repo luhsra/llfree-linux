@@ -60,6 +60,16 @@ typedef unsigned int __bitwise gfp_t;
 #else
 #define ___GFP_NOLOCKDEP	0
 #endif
+
+#ifdef CONFIG_NVALLOC_SIZE_COUNTERS
+#ifdef CONFIG_KASAN_HW_TAGS
+#error size counters and kasan using overwrapping flags!
+#endif
+#define ___GFP_SC_USER 		0x1000000u
+#else
+#define ___GFP_SC_USER 		0
+#endif
+
 /* If the above are modified, __GFP_BITS_SHIFT may need updating */
 
 /*
@@ -335,7 +345,8 @@ typedef unsigned int __bitwise gfp_t;
 #define GFP_NOWAIT	(__GFP_KSWAPD_RECLAIM)
 #define GFP_NOIO	(__GFP_RECLAIM)
 #define GFP_NOFS	(__GFP_RECLAIM | __GFP_IO)
-#define GFP_USER	(__GFP_RECLAIM | __GFP_IO | __GFP_FS | __GFP_HARDWALL)
+#define GFP_USER 	(__GFP_RECLAIM | __GFP_IO | __GFP_FS | \
+			 __GFP_HARDWALL | ___GFP_SC_USER)
 #define GFP_DMA		__GFP_DMA
 #define GFP_DMA32	__GFP_DMA32
 #define GFP_HIGHUSER	(GFP_USER | __GFP_HIGHMEM)

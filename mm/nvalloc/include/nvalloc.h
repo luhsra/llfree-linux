@@ -26,6 +26,8 @@ u8 *nvalloc_get(void *alloc, u32 core, u32 order);
 u64 nvalloc_put(void *alloc, u32 core, u8 *addr, u32 order);
 /// Checks if the page is free
 u64 nvalloc_is_free(void *alloc, u8 *addr, u32 order);
+/// Drain any CPU-local reservations
+u64 nvalloc_drain(void *alloc, u32 core);
 
 /// Debug: Return number of free pages.
 u64 nvalloc_free_count(void *alloc);

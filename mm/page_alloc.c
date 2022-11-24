@@ -3463,16 +3463,22 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		free_pcppages_bulk(zone, to_drain, pcp, 0);
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
+#else
+	if (zone->nvalloc) {
+		int cpu = smp_processor_id();
+		int ret = nvalloc_drain(zone->nvalloc, cpu);
+		BUG_ON(nvalloc_err(ret));
+	}
 #endif
 }
 #endif
 
-#ifndef CONFIG_NVALLOC
 /*
  * Drain pcplists of the indicated processor and zone.
  */
 static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 {
+#ifndef CONFIG_NVALLOC
 	struct per_cpu_pages *pcp;
 
 	pcp = per_cpu_ptr(zone->per_cpu_pageset, cpu);
@@ -3484,6 +3490,12 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		free_pcppages_bulk(zone, pcp->count, pcp, 0);
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
+#else
+	if (zone->nvalloc) {
+		int ret = nvalloc_drain(zone->nvalloc, cpu);
+		BUG_ON(nvalloc_err(ret));
+	}
+#endif
 }
 
 /*
@@ -3497,24 +3509,19 @@ static void drain_pages(unsigned int cpu)
 		drain_pages_zone(cpu, zone);
 	}
 }
-#endif // CONFIG_NVALLOC
 
 /*
  * Spill all of this CPU's per-cpu pages back into the buddy allocator.
  */
 void drain_local_pages(struct zone *zone)
 {
-#ifndef CONFIG_NVALLOC
 	int cpu = smp_processor_id();
 
 	if (zone)
 		drain_pages_zone(cpu, zone);
 	else
 		drain_pages(cpu);
-#endif
 }
-
-#ifndef CONFIG_NVALLOC
 
 /*
  * The implementation of drain_all_pages(), exposing an extra parameter to
@@ -3530,6 +3537,7 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 {
 	int cpu;
 
+#ifndef CONFIG_NVALLOC
 	/*
 	 * Allocate in the BSS so we won't require allocation in
 	 * direct reclaim path for CONFIG_CPUMASK_OFFSTACK=y
@@ -3592,9 +3600,17 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 	}
 
 	mutex_unlock(&pcpu_drain_mutex);
+#else
+	const cpumask_t *mask = force_all_cpus ? cpu_possible_mask :
+						 cpu_online_mask;
+	for_each_cpu(cpu, mask) {
+		if (zone)
+			drain_pages_zone(cpu, zone);
+		else
+			drain_pages(cpu);
+	}
+#endif
 }
-
-#endif // CONFIG_NVALLOC
 
 /*
  * Spill all the per-cpu pages from all CPUs back into the buddy allocator.
@@ -3603,9 +3619,7 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
  */
 void drain_all_pages(struct zone *zone)
 {
-#ifndef CONFIG_NVALLOC
 	__drain_all_pages(zone, false);
-#endif
 }
 
 #ifdef CONFIG_HIBERNATION
@@ -8937,9 +8951,7 @@ static int page_alloc_cpu_dead(unsigned int cpu)
 
 	lru_add_drain_cpu(cpu);
 	mlock_page_drain_remote(cpu);
-#ifndef CONFIG_NVALLOC
 	drain_pages(cpu);
-#endif
 
 	/*
 	 * Spill the event counters of the dead processor
@@ -9881,9 +9893,7 @@ void zone_pcp_disable(struct zone *zone)
 {
 	mutex_lock(&pcp_batch_high_lock);
 	__zone_set_pageset_high_and_batch(zone, 0, 1);
-#ifndef CONFIG_NVALLOC
 	__drain_all_pages(zone, true);
-#endif
 }
 
 void zone_pcp_enable(struct zone *zone)

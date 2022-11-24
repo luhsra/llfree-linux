@@ -17,7 +17,7 @@ use log::{error, warn, Level, Metadata, Record};
 use nvalloc::lower::Cache;
 use nvalloc::table::PT_LEN;
 use nvalloc::upper::Persistency::Volatile;
-use nvalloc::upper::{Alloc, AllocNew, Array};
+use nvalloc::upper::{Alloc, AllocExt, Array};
 use nvalloc::util::{div_ceil, Page};
 use nvalloc::Error;
 
@@ -111,6 +111,18 @@ pub extern "C" fn nvalloc_put(
 ) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.put(core as _, addr as _, order as _) {
+            Ok(_) => 0,
+            Err(e) => e as u64,
+        }
+    } else {
+        Error::Initialization as u64
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn nvalloc_drain(alloc: *const Allocator, core: u32) -> u64 {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        match alloc.drain(core as _) {
             Ok(_) => 0,
             Err(e) => e as u64,
         }

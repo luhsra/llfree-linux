@@ -408,13 +408,16 @@ postcore_initcall(size_counters_init);
 static inline u64 size_counters_start() {
 	return 0;
 }
-static void size_counters_alloc(gfp_t flags, int order)
+inline static void size_counters_alloc(gfp_t flags, int order)
 {
 }
-static void size_counters_bulk_alloc(gfp_t flags, u64 inc)
+inline static void size_counters_bulk_alloc(gfp_t flags, u64 inc)
 {
 }
-static void size_counters_free(int order)
+inline static void size_counters_free(int order)
+{
+}
+inline static void size_counters_bulk_free(u64 inc)
 {
 }
 #endif // CONFIG_NVALLOC_SIZE_COUNTERS
@@ -3522,6 +3525,7 @@ void drain_local_pages(struct zone *zone)
 	else
 		drain_pages(cpu);
 }
+EXPORT_SYMBOL(drain_local_pages);
 
 /*
  * The implementation of drain_all_pages(), exposing an extra parameter to
@@ -3621,6 +3625,7 @@ void drain_all_pages(struct zone *zone)
 {
 	__drain_all_pages(zone, false);
 }
+EXPORT_SYMBOL(drain_all_pages);
 
 #ifdef CONFIG_HIBERNATION
 

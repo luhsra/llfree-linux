@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(int_roundings)]
 #![feature(alloc_error_handler)]
 
 #[allow(unused_imports)]
@@ -16,9 +17,9 @@ use log::{error, warn, Level, Metadata, Record};
 
 use nvalloc::lower::Cache;
 use nvalloc::table::PT_LEN;
-use nvalloc::upper::Persistency::Volatile;
+use nvalloc::upper::Init::Volatile;
 use nvalloc::upper::{Alloc, AllocExt, Array};
-use nvalloc::util::{div_ceil, Page};
+use nvalloc::util::Page;
 use nvalloc::Error;
 
 const MOD: &[u8] = b"nvalloc\0";
@@ -61,7 +62,7 @@ pub extern "C" fn nvalloc_init(
 
     if pages > 0 {
         let aligned = nvalloc::util::align_down(start as usize, Page::SIZE * PT_LEN) as *mut c_void;
-        let offset = div_ceil(start as usize - aligned as usize, Page::SIZE);
+        let offset = (start as usize - aligned as usize).div_ceil(Page::SIZE);
 
         let memory =
             unsafe { core::slice::from_raw_parts_mut(aligned.cast(), pages as usize + offset) };
@@ -386,6 +387,7 @@ pub(crate) struct RawFormatter {
 }
 
 impl RawFormatter {
+    #[allow(unused)]
     /// Creates a new instance of [`RawFormatter`] with an empty buffer.
     fn new() -> Self {
         // INVARIANT: The buffer is empty, so the region that needs to be writable is empty.

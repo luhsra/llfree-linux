@@ -169,6 +169,29 @@ pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
     }
 }
 
+static mut C_FUNCTION: Option<(extern "C" fn(*mut c_void, u16), *mut c_void)> = None;
+
+fn huge_page_handler(count: usize) {
+    if let Some((f, arg)) = unsafe { C_FUNCTION.as_ref() } {
+        f(*arg, count as _);
+    }
+}
+
+#[cold]
+#[no_mangle]
+pub extern "C" fn nvalloc_for_each_huge_page(
+    alloc: *const Allocator,
+    f: extern "C" fn(*mut c_void, u16),
+    arg: *mut c_void,
+) {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        assert!(unsafe { C_FUNCTION.is_none() });
+        unsafe { C_FUNCTION = Some((f, arg)) };
+        alloc.dbg_for_each_huge_page(huge_page_handler);
+        unsafe { C_FUNCTION = None };
+    }
+}
+
 /// # Safety
 /// This writes into the provided memory buffer which has to be valid.
 #[cold]

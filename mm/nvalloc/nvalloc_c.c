@@ -107,6 +107,7 @@ EXPORT_SYMBOL(nvalloc_free_count);
 EXPORT_SYMBOL(nvalloc_free_huge_count);
 EXPORT_SYMBOL(nvalloc_dump);
 EXPORT_SYMBOL(nvalloc_printk);
+EXPORT_SYMBOL(nvalloc_for_each_huge_page);
 
 module_init(nvalloc_init_module);
 module_exit(nvalloc_cleanup_module);

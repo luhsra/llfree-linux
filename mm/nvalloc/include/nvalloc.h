@@ -37,6 +37,8 @@ u64 nvalloc_free_huge_count(void *alloc);
 void nvalloc_printk(void *alloc);
 /// Debug: Print allocator state to the given buffer
 u64 nvalloc_dump(void *alloc, u8 *buf, u64 len);
+/// Debug: Execute f for every huge page with the number of free pages
+void nvalloc_for_each_huge_page(void *alloc, void (*f)(void *, u16), void *arg);
 
 static inline bool nvalloc_err(u64 ret)
 {

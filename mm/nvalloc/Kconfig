@@ -14,4 +14,10 @@ config NVALLOC_SIZE_COUNTERS
 	help
 	  Debug counters for page allocations.
 
+config NVALLOC_FAST_FREE
+	bool "Fast frees"
+	depends on X86_64 && SPARSEMEM && SLUB
+	help
+	  Skip struct page checks for higher order frees. This might break memory hotplugging.
+
 endmenu

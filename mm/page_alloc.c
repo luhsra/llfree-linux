@@ -15,6 +15,7 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
+#include "linux/compiler_attributes.h"
 #include "linux/gfp_types.h"
 #include <nvalloc.h>
 
@@ -1677,11 +1678,13 @@ static bool free_pages_prepare(struct page *page,
 		for (i = 1; i < (1 << order); i++) {
 			if (compound)
 				bad += free_tail_pages_check(page, page + i);
-			if (unlikely(free_page_is_bad(page + i))) {
-				bad++;
-				continue;
+			if (!IS_ENABLED(CONFIG_NVALLOC_FAST_FREE) || compound) {
+				if (unlikely(free_page_is_bad(page + i))) {
+					bad++;
+					continue;
+				}
+				(page + i)->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
 			}
-			(page + i)->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
 		}
 	}
 	if (PageMappingFlags(page))

@@ -359,6 +359,14 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 	x = delta + __this_cpu_read(*p);
 
 	t = __this_cpu_read(pcp->stat_threshold);
+#ifdef CONFIG_NVALLOC_FAST_FREE
+	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
+	    item == NR_FREE_PAGES) {
+		// Resolving hugepage allocation bottleneck!
+		t += 1024;
+	}
+#endif
+
 
 	if (unlikely(abs(x) > t)) {
 		zone_page_state_add(x, zone, item);

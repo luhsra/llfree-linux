@@ -1301,7 +1301,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 {
 	// First what are all of these args doing?
 	// page, pfn, zone, order are clear
-	// migratetype: ?
+	// migratetype: memory compaction -> disable for now
 	// fpi_flags: buddy alloc specific (free notifications, list opt, kasan poisioning)
 	u64 ret, cpu;
 	struct capture_control *capc = task_capc(zone);
@@ -4220,8 +4220,11 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 				   int migratetype)
 {
 	struct page *page = NULL;
-	int cpu = get_cpu();
-	u8 *addr = nvalloc_get(zone->nvalloc, cpu, order);
+	int cpu;
+	u8 *addr;
+
+	cpu = get_cpu();
+	addr = nvalloc_get(zone->nvalloc, cpu, order);
 
 	if (nvalloc_err((u64)addr)) {
 		put_cpu();
@@ -4389,8 +4392,12 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		return false;
 
 	/* If this is an order-0 request then the watermark is fine */
-	if (!order || IS_ENABLED(CONFIG_NVALLOC))
+	if (!order)
 		return true;
+
+#ifdef CONFIG_NVALLOC
+	return true;
+#endif
 
 	/* For a high-order request, check at least one suitable page is free */
 	for (o = order; o < MAX_ORDER; o++) {

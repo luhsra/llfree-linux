@@ -397,7 +397,7 @@ struct per_cpu_pages {
 
 struct per_cpu_zonestat {
 #ifdef CONFIG_SMP
-	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
+	s16 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
 	s8 stat_threshold;
 #endif
 #ifdef CONFIG_NUMA

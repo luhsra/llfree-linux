@@ -361,7 +361,7 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 	x = delta + __this_cpu_read(*p);
 
 	t = __this_cpu_read(pcp->stat_threshold);
-#ifdef CONFIG_NVALLOC_FAST_FREE
+#ifdef CONFIG_NVALLOC
 	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
 	    item == NR_FREE_PAGES) {
 		// Resolving hugepage allocation bottleneck!
@@ -454,7 +454,7 @@ void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 
 	v = __this_cpu_inc_return(*p);
 	t = __this_cpu_read(pcp->stat_threshold);
-#ifdef CONFIG_NVALLOC_FAST_FREE
+#ifdef CONFIG_NVALLOC
 	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
 	    item == NR_FREE_PAGES) {
 		// Resolving hugepage allocation bottleneck!
@@ -521,7 +521,7 @@ void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 
 	v = __this_cpu_dec_return(*p);
 	t = __this_cpu_read(pcp->stat_threshold);
-#ifdef CONFIG_NVALLOC_FAST_FREE
+#ifdef CONFIG_NVALLOC
 	if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
 	    item == NR_FREE_PAGES) {
 		// Resolving hugepage allocation bottleneck!
@@ -610,7 +610,7 @@ static inline void mod_zone_state(struct zone *zone,
 		 * for all cpus in a zone.
 		 */
 		t = this_cpu_read(pcp->stat_threshold);
-#ifdef CONFIG_NVALLOC_FAST_FREE
+#ifdef CONFIG_NVALLOC
 		if (atomic_long_read(&zone->managed_pages) > (512 * 512) &&
 		    item == NR_FREE_PAGES) {
 			// Resolving hugepage allocation bottleneck!

@@ -345,7 +345,7 @@ static ssize_t size_counters_show(struct kobject *kobj,
 
 	// csv header
 	len += _check_ret(snprintf(buf + len, PAGE_SIZE - len,
-				   "op,order,count,avg,std,bulk\n"));
+				   "op,order,count,bulk\n"));
 
 	// csv body
 	for (size_t o = 0; o < sizeof(ops) / sizeof(*ops); o++) {

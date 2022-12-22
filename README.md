@@ -3,7 +3,7 @@
 In addition to the general dependencies rust `nightly` version `1.64.0` (or newer) is needed.
 > Rustup is recommended: [install rust](https://www.rust-lang.org/learn/get-started)
 
-First enable the `CONFIG_NVALLOC` option (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
+First enable the `CONFIG_NVALLOC` and `CONFIG_NVALLOC_FAST_FREE` options (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
 Then the Kernel can be build as usual (with llvm):
 
 ```sh

@@ -1,5 +1,7 @@
 # In kbuild context
-obj-y := nvalloc.o
+obj-$(CONFIG_NVALLOC) += nvalloc.o
+obj-$(CONFIG_NVALLOC_SIZE_COUNTERS) += size_counters.o
+
 nvalloc-objs := nvalloc_c.o nvalloc_rs.o
 
 nvalloc-a := mm/nvalloc/target/x86_64-linux/release/libnvalloc_module.a

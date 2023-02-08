@@ -474,6 +474,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 		pte_free(mm, new);
 	return 0;
 }
+EXPORT_SYMBOL(__pte_alloc);
 
 int __pte_alloc_kernel(pmd_t *pmd)
 {
@@ -5257,6 +5258,7 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }
+EXPORT_SYMBOL(__p4d_alloc);
 #endif /* __PAGETABLE_P4D_FOLDED */
 
 #ifndef __PAGETABLE_PUD_FOLDED
@@ -5280,6 +5282,7 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 	spin_unlock(&mm->page_table_lock);
 	return 0;
 }
+EXPORT_SYMBOL(__pud_alloc);
 #endif /* __PAGETABLE_PUD_FOLDED */
 
 #ifndef __PAGETABLE_PMD_FOLDED
@@ -5305,6 +5308,7 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 	spin_unlock(ptl);
 	return 0;
 }
+EXPORT_SYMBOL(__pmd_alloc);
 #endif /* __PAGETABLE_PMD_FOLDED */
 
 /**

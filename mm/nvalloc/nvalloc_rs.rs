@@ -15,11 +15,10 @@ use core::sync::atomic::{self, AtomicU64, Ordering};
 use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
+use nvalloc::frame::{Frame, PFNRange, PFN};
 use nvalloc::lower::Cache;
-use nvalloc::table::PT_LEN;
 use nvalloc::upper::Init::Volatile;
 use nvalloc::upper::{Alloc, AllocExt, Array};
-use nvalloc::util::Page;
 use nvalloc::Error;
 
 const MOD: &[u8] = b"nvalloc\0";
@@ -33,7 +32,8 @@ extern "C" {
     fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
-type Allocator = Array<3, Cache<32>>;
+type Lower = Cache<32>;
+type Allocator = Array<3, Lower>;
 
 static NODE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -56,20 +56,18 @@ pub extern "C" fn nvalloc_init(
 
     let persistent = persistent != 0;
     assert!(!persistent, "Currently not supported!");
+    assert!(start as usize % Frame::SIZE == 0, "Invalid alignment");
 
     // Set zone id for allocations
     NODE_ID.store(node, Ordering::Release);
 
     if pages > 0 {
-        let aligned = nvalloc::util::align_down(start as usize, Page::SIZE * PT_LEN) as *mut c_void;
-        let offset = (start as usize - aligned as usize).div_ceil(Page::SIZE);
+        let pfn = PFN::from_ptr(start.cast());
+        let area = pfn..pfn.off(pages as _);
 
-        let memory =
-            unsafe { core::slice::from_raw_parts_mut(aligned.cast(), pages as usize + offset) };
-
-        match Allocator::new(cores as _, memory, Volatile, false) {
+        match Allocator::new(cores as _, area.clone(), Volatile, false) {
             Ok(alloc) => {
-                warn!("setup mem={:?} ({})", memory.as_ptr_range(), alloc.pages());
+                warn!("setup mem={:?} ({})", area.as_ptr_range(), alloc.frames());
                 // Move to newly allocated memory and leak address
                 Box::leak(Box::new(alloc)) as *mut Allocator as _
             }
@@ -94,7 +92,7 @@ pub extern "C" fn nvalloc_uninit(alloc: *mut Allocator) {
 pub extern "C" fn nvalloc_get(alloc: *const Allocator, core: u32, order: u32) -> *mut u8 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.get(core as _, order as _) {
-            Ok(addr) => addr as _,
+            Ok(addr) => addr.as_ptr_mut().cast(),
             Err(e) => e as u64 as _,
         }
     } else {
@@ -111,7 +109,7 @@ pub extern "C" fn nvalloc_put(
     order: u32,
 ) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        match alloc.put(core as _, addr as _, order as _) {
+        match alloc.put(core as _, PFN::from_ptr(addr.cast()), order as _) {
             Ok(_) => 0,
             Err(e) => e as u64,
         }
@@ -135,7 +133,7 @@ pub extern "C" fn nvalloc_drain(alloc: *const Allocator, core: u32) -> u64 {
 #[no_mangle]
 pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.is_free(addr as _, order as _) as _
+        alloc.is_free(PFN::from_ptr(addr.cast()), order as _) as _
     } else {
         0
     }
@@ -145,7 +143,7 @@ pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order:
 #[no_mangle]
 pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.dbg_free_pages() as u64
+        alloc.free_frames() as u64
     } else {
         0
     }
@@ -155,7 +153,7 @@ pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
 #[no_mangle]
 pub extern "C" fn nvalloc_free_huge_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.dbg_free_huge_pages() as u64
+        alloc.free_huge_frames() as u64
     } else {
         0
     }
@@ -171,7 +169,7 @@ pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
 
 static mut C_FUNCTION: Option<(extern "C" fn(*mut c_void, u16), *mut c_void)> = None;
 
-fn huge_page_handler(count: usize) {
+fn huge_page_handler(_: PFN, count: usize) {
     if let Some((f, arg)) = unsafe { C_FUNCTION.as_ref() } {
         f(*arg, count as _);
     }
@@ -187,7 +185,7 @@ pub extern "C" fn nvalloc_for_each_huge_page(
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         assert!(unsafe { C_FUNCTION.is_none() });
         unsafe { C_FUNCTION = Some((f, arg)) };
-        alloc.dbg_for_each_huge_page(huge_page_handler);
+        alloc.for_each_huge_frame(huge_page_handler);
         unsafe { C_FUNCTION = None };
     }
 }

@@ -2459,7 +2459,7 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	case 'f':
 		return fwnode_string(buf, end, ptr, spec, fmt + 1);
 	case 'A':
-		if (!IS_ENABLED(CONFIG_RUST)) {
+		if (!IS_ENABLED(CONFIG_RUST) && !IS_ENABLED(CONFIG_NVALLOC)) {
 			WARN_ONCE(1, "Please remove %%pA from non-Rust code\n");
 			return error_string(buf, end, "(%pA?)", spec);
 		}
@@ -2479,10 +2479,6 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 		default:
 			return error_string(buf, end, "(einval)", spec);
 		}
-#ifdef CONFIG_NVALLOC
-	case 'A':
-		return rust_fmt_argument(buf, end, ptr);
-#endif
 	default:
 		return default_pointer(buf, end, ptr, spec);
 	}

@@ -167,14 +167,6 @@ pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
     }
 }
 
-static mut C_FUNCTION: Option<(extern "C" fn(*mut c_void, u16), *mut c_void)> = None;
-
-fn huge_page_handler(_: PFN, count: usize) {
-    if let Some((f, arg)) = unsafe { C_FUNCTION.as_ref() } {
-        f(*arg, count as _);
-    }
-}
-
 #[cold]
 #[no_mangle]
 pub extern "C" fn nvalloc_for_each_huge_page(
@@ -182,11 +174,15 @@ pub extern "C" fn nvalloc_for_each_huge_page(
     f: extern "C" fn(*mut c_void, u16),
     arg: *mut c_void,
 ) {
+    type CTX = (extern "C" fn(*mut c_void, u16), *mut c_void);
+
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        assert!(unsafe { C_FUNCTION.is_none() });
-        unsafe { C_FUNCTION = Some((f, arg)) };
-        alloc.for_each_huge_frame(huge_page_handler);
-        unsafe { C_FUNCTION = None };
+        let mut ctx: CTX = (f, arg);
+        alloc.for_each_huge_frame((&mut ctx) as *mut CTX as _, |ctx, _, free| {
+            // SAFETY: ctx outlives this callback
+            let (f, arg) = unsafe { *ctx.cast::<CTX>() };
+            f(arg, free as _)
+        });
     }
 }
 
@@ -196,7 +192,8 @@ pub extern "C" fn nvalloc_for_each_huge_page(
 #[no_mangle]
 pub extern "C" fn nvalloc_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        let mut writer = unsafe { RawFormatter::from_buffer(buf, len as _) };
+        let mut writer =
+            unsafe { RawFormatter::from_ptrs(buf, (buf as usize).saturating_add(len as _) as _) };
         if writeln!(writer, "{alloc:?}").is_err() {
             error!("write failed after {}B", writer.bytes_written());
         }
@@ -400,32 +397,22 @@ pub unsafe fn call_printk(format_string: &[u8; format_strings::LENGTH], args: &R
 ///
 /// The memory region between `pos` (inclusive) and `end` (exclusive) is valid for writes if `pos`
 /// is less than `end`.
-pub(crate) struct RawFormatter {
+struct RawFormatter {
     // Use `usize` to use `saturating_*` functions.
+    #[allow(dead_code)]
     beg: usize,
     pos: usize,
     end: usize,
 }
 
 impl RawFormatter {
-    #[allow(unused)]
-    /// Creates a new instance of [`RawFormatter`] with an empty buffer.
-    fn new() -> Self {
-        // INVARIANT: The buffer is empty, so the region that needs to be writable is empty.
-        Self {
-            beg: 0,
-            pos: 0,
-            end: 0,
-        }
-    }
-
     /// Creates a new instance of [`RawFormatter`] with the given buffer pointers.
     ///
     /// # Safety
     ///
     /// If `pos` is less than `end`, then the region between `pos` (inclusive) and `end`
     /// (exclusive) must be valid for writes for the lifetime of the returned [`RawFormatter`].
-    pub(crate) unsafe fn from_ptrs(pos: *mut u8, end: *mut u8) -> Self {
+    unsafe fn from_ptrs(pos: *mut u8, end: *mut u8) -> Self {
         // INVARIANT: The safety requierments guarantee the type invariants.
         Self {
             beg: pos as _,
@@ -434,32 +421,15 @@ impl RawFormatter {
         }
     }
 
-    /// Creates a new instance of [`RawFormatter`] with the given buffer.
-    ///
-    /// # Safety
-    ///
-    /// The memory region starting at `buf` and extending for `len` bytes must be valid for writes
-    /// for the lifetime of the returned [`RawFormatter`].
-    pub(crate) unsafe fn from_buffer(buf: *mut u8, len: usize) -> Self {
-        let pos = buf as usize;
-        // INVARIANT: We ensure that `end` is never less then `buf`, and the safety requirements
-        // guarantees that the memory region is valid for writes.
-        Self {
-            pos,
-            beg: pos,
-            end: pos.saturating_add(len),
-        }
-    }
-
     /// Returns the current insert position.
     ///
     /// N.B. It may point to invalid memory.
-    pub(crate) fn pos(&self) -> *mut u8 {
+    fn pos(&self) -> *mut u8 {
         self.pos as _
     }
 
     /// Return the number of bytes written to the formatter.
-    pub(crate) fn bytes_written(&self) -> usize {
+    fn bytes_written(&self) -> usize {
         self.pos - self.beg
     }
 }

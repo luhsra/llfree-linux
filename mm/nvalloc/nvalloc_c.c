@@ -8,6 +8,9 @@
 #include <linux/mmzone.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/device.h>
+#include <linux/kdev_t.h>
+#include <linux/dax.h>
 
 MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("NVM Allocator");
@@ -97,17 +100,37 @@ static int __init nvalloc_init_module(void)
 	proc_create_seq("nvalloc", 0444, NULL, &nvalloc_op);
 	return 0;
 }
+module_init(nvalloc_init_module);
+
+static __init int find_dax_init(void) {
+	dev_t dax_id = MKDEV(252, 0); // /dev/dax0.0
+	struct device *dax_dev;
+	void *dax_begin;
+	u64 dax_len;
+
+	dax_dev = device_dax_driver_find_device_by_devt(dax_id);
+	if (dax_dev == NULL) {
+		pr_err("No dax device found");
+		return 0;
+	}
+
+	pr_info("Found dax device %s", dax_dev->init_name);
+
+	dax_begin = device_dax_find_address_range_by_devt(dax_id, &dax_len);
+	pr_info("Range %p-%p (%llu)", dax_begin, dax_begin + dax_len, dax_len);
+
+	return 0;
+}
+late_initcall(find_dax_init);
 
 static void nvalloc_cleanup_module(void)
 {
 	pr_info("uninit\n");
 }
+module_exit(nvalloc_cleanup_module);
 
 EXPORT_SYMBOL(nvalloc_free_count);
 EXPORT_SYMBOL(nvalloc_free_huge_count);
 EXPORT_SYMBOL(nvalloc_dump);
 EXPORT_SYMBOL(nvalloc_printk);
 EXPORT_SYMBOL(nvalloc_for_each_huge_page);
-
-module_init(nvalloc_init_module);
-module_exit(nvalloc_cleanup_module);

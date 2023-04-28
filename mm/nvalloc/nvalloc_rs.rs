@@ -17,7 +17,7 @@ use log::{error, warn, Level, Metadata, Record};
 
 use nvalloc::frame::{Frame, PFNRange, PFN};
 use nvalloc::lower::Cache;
-use nvalloc::upper::Init::Volatile;
+use nvalloc::upper::Init::{Recover, Volatile};
 use nvalloc::upper::{Alloc, AllocExt, Array};
 use nvalloc::Error;
 
@@ -54,8 +54,10 @@ pub extern "C" fn nvalloc_init(
 
     warn!("Initializing inside rust");
 
-    let persistent = persistent != 0;
-    assert!(!persistent, "Currently not supported!");
+    let init = if persistent == 0 { Volatile } else { Recover };
+    // Linux usually initializes its allocator with all memory occupied and afterwards frees the avaliable memory of the boot allocator.
+    // If persistent, we have to store our own metadata into the zone, thus require the memory to be avaliable.
+    let free_all = persistent != 0;
     assert!(start as usize % Frame::SIZE == 0, "Invalid alignment");
 
     // Set zone id for allocations
@@ -65,7 +67,7 @@ pub extern "C" fn nvalloc_init(
         let pfn = PFN::from_ptr(start.cast());
         let area = pfn..pfn.off(pages as _);
 
-        match Allocator::new(cores as _, area.clone(), Volatile, false) {
+        match Allocator::new(cores as _, area.clone(), init, free_all) {
             Ok(alloc) => {
                 warn!("setup mem={:?} ({})", area.as_ptr_range(), alloc.frames());
                 // Move to newly allocated memory and leak address

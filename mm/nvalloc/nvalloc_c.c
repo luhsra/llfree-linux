@@ -2,6 +2,8 @@
 
 #include "nvalloc.h"
 
+#include <linux/align.h>
+#include <linux/bug.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/memblock.h>
@@ -21,6 +23,7 @@ MODULE_AUTHOR("Lars Wrenger");
 /// Linux provided alloc function
 u8 *nvalloc_linux_alloc(u64 node, u64 size, u64 align)
 {
+	// TODO: Fixme
 	return memblock_alloc_node(size, align, node);
 }
 /// Linux provided free function
@@ -102,11 +105,13 @@ static int __init nvalloc_init_module(void)
 }
 module_init(nvalloc_init_module);
 
-static __init int find_dax_init(void) {
+static __init int find_dax_init(void)
+{
 	dev_t dax_id = MKDEV(252, 0); // /dev/dax0.0
 	struct device *dax_dev;
-	void *dax_begin;
+	u8 *dax_begin;
 	u64 dax_len;
+	void *nvalloc;
 
 	dax_dev = device_dax_driver_find_device_by_devt(dax_id);
 	if (dax_dev == NULL) {
@@ -117,7 +122,16 @@ static __init int find_dax_init(void) {
 	pr_info("Found dax device %s", dax_dev->init_name);
 
 	dax_begin = device_dax_find_address_range_by_devt(dax_id, &dax_len);
-	pr_info("Range %p-%p (%llu)", dax_begin, dax_begin + dax_len, dax_len);
+	pr_info("Range: %lx-%lx (%llu)", (u64)dax_begin,
+		(u64)dax_begin + dax_len, dax_len);
+
+	BUG_ON(!IS_ALIGNED((size_t)dax_begin, HPAGE_SIZE));
+
+	nvalloc = nvalloc_init(0, num_online_cpus(), true, dax_begin,
+			       dax_len / PAGE_SIZE);
+	BUG_ON(nvalloc_err((u64)nvalloc));
+
+	nvalloc_printk(nvalloc);
 
 	return 0;
 }

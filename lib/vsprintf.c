@@ -54,7 +54,7 @@
 #include <linux/string_helpers.h>
 #include "kstrtox.h"
 
-#include <nvalloc.h>
+#include <llfree.h>
 
 /* Disable pointer hashing if requested */
 bool no_hash_pointers __ro_after_init;
@@ -2461,7 +2461,7 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 		default:
 			return error_string(buf, end, "(einval)", spec);
 		}
-#ifdef CONFIG_NVALLOC
+#ifdef CONFIG_LLFREE
 	case 'A':
 		return rust_fmt_argument(buf, end, ptr);
 #endif

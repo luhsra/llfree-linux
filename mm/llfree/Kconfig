@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-menu "NVAlloc Page Allocator"
+menu "LLFree Page Allocator"
 
-config NVALLOC
-	bool "NVALLOC Allocator"
+config LLFREE
+	bool "LLFree Allocator"
 	depends on X86_64 && SPARSEMEM && SLUB
 	help
 	  A new experimental allocator for volatile and persistent memory.
 
-config NVALLOC_SIZE_COUNTERS
+config LLFREE_SIZE_COUNTERS
 	bool "Size counters"
 	depends on X86_64 && SPARSEMEM && SLUB
 	help
 	  Debug counters for page allocations.
 
-config NVALLOC_FAST_FREE
+config LLFREE_FAST_FREE
 	bool "Fast frees"
 	depends on X86_64 && SPARSEMEM && SLUB
 	help

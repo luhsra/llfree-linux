@@ -538,8 +538,8 @@ struct zone {
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
-#ifdef CONFIG_NVALLOC
-	void *nvalloc;
+#ifdef CONFIG_LLFREE
+	void *llfree;
 #endif
 	/*
 	 * the high and batch values are copied to individual pagesets for

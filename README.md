@@ -1,19 +1,19 @@
-# Linux with NVAlloc
+# Linux with LLFree
 
 In addition to the general dependencies rust `nightly` version `1.64.0` (or newer) is needed.
 > Rustup is recommended: [install rust](https://www.rust-lang.org/learn/get-started)
 
-First enable the `CONFIG_NVALLOC` and `CONFIG_NVALLOC_FAST_FREE` options (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
+First enable the `CONFIG_LLFREE` and `CONFIG_LLFREE_FAST_FREE` options (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
 Then the Kernel can be build as usual (with llvm):
 
 ```sh
-make O=build-nvalloc-vm LLVM=1 #...
+make O=build-llfree-vm LLVM=1 #...
 ```
 
 ## Structure
 
-The nvalloc module can be found in [mm/nvalloc](mm/nvalloc).
-It consists of a rust library that uses the [nvalloc-rs](https://scm.sra.uni-hannover.de/research/nvalloc-rs) crate and a c wrapper.
+The llfree module can be found in [mm/llfree](mm/llfree).
+It consists of a rust library that uses the [llfree-rs](https://github.com/luhsra/llfree-rs) crate and a c wrapper.
 
 ## Problems
 

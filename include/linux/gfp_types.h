@@ -61,7 +61,7 @@ typedef unsigned int __bitwise gfp_t;
 #define ___GFP_NOLOCKDEP	0
 #endif
 
-#ifdef CONFIG_NVALLOC_SIZE_COUNTERS
+#ifdef CONFIG_LLFREE_SIZE_COUNTERS
 #ifdef CONFIG_KASAN_HW_TAGS
 #error size counters and kasan using overwrapping flags!
 #endif

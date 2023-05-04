@@ -15,21 +15,21 @@ use core::sync::atomic::{self, AtomicU64, Ordering};
 use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
-use nvalloc::frame::{Frame, PFNRange, PFN};
-use nvalloc::lower::Cache;
-use nvalloc::upper::Init::Volatile;
-use nvalloc::upper::{Alloc, AllocExt, Array};
-use nvalloc::Error;
+use llfree::frame::{Frame, PFNRange, PFN};
+use llfree::lower::Cache;
+use llfree::upper::Init::Volatile;
+use llfree::upper::{Alloc, AllocExt, Array};
+use llfree::Error;
 
-const MOD: &[u8] = b"nvalloc\0";
+const MOD: &[u8] = b"llfree\0";
 
 extern "C" {
     /// Linux provided alloc function
-    fn nvalloc_linux_alloc(node: u64, size: u64, align: u64) -> *mut u8;
+    fn llfree_linux_alloc(node: u64, size: u64, align: u64) -> *mut u8;
     /// Linux provided free function
-    fn nvalloc_linux_free(ptr: *mut u8, size: u64, align: u64);
+    fn llfree_linux_free(ptr: *mut u8, size: u64, align: u64);
     /// Linux provided printk function
-    fn nvalloc_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
+    fn llfree_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
 
 type Lower = Cache<32>;
@@ -43,7 +43,7 @@ static NODE_ID: AtomicU64 = AtomicU64::new(0);
 #[cold]
 #[link_section = ".init.text"]
 #[no_mangle]
-pub extern "C" fn nvalloc_init(
+pub extern "C" fn llfree_init(
     node: u64,
     cores: u32,
     persistent: u8,
@@ -81,7 +81,7 @@ pub extern "C" fn nvalloc_init(
 /// Shut down the allocator normally.
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_uninit(alloc: *mut Allocator) {
+pub extern "C" fn llfree_uninit(alloc: *mut Allocator) {
     if !alloc.is_null() {
         unsafe { core::mem::drop(Box::from_raw(alloc as *mut Allocator)) };
     }
@@ -89,7 +89,7 @@ pub extern "C" fn nvalloc_uninit(alloc: *mut Allocator) {
 
 /// Allocates 2^order pages. Returns >=PAGE_SIZE on success an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_get(alloc: *const Allocator, core: u32, order: u32) -> *mut u8 {
+pub extern "C" fn llfree_get(alloc: *const Allocator, core: u32, order: u32) -> *mut u8 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.get(core as _, order as _) {
             Ok(addr) => addr.as_ptr_mut().cast(),
@@ -102,7 +102,7 @@ pub extern "C" fn nvalloc_get(alloc: *const Allocator, core: u32, order: u32) ->
 
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 #[no_mangle]
-pub extern "C" fn nvalloc_put(
+pub extern "C" fn llfree_put(
     alloc: *const Allocator,
     core: u32,
     addr: *mut u8,
@@ -119,7 +119,7 @@ pub extern "C" fn nvalloc_put(
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_drain(alloc: *const Allocator, core: u32) -> u64 {
+pub extern "C" fn llfree_drain(alloc: *const Allocator, core: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.drain(core as _) {
             Ok(_) => 0,
@@ -131,7 +131,7 @@ pub extern "C" fn nvalloc_drain(alloc: *const Allocator, core: u32) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> u64 {
+pub extern "C" fn llfree_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.is_free(PFN::from_ptr(addr.cast()), order as _) as _
     } else {
@@ -141,7 +141,7 @@ pub extern "C" fn nvalloc_is_free(alloc: *const Allocator, addr: *mut u8, order:
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
+pub extern "C" fn llfree_free_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.free_frames() as u64
     } else {
@@ -151,7 +151,7 @@ pub extern "C" fn nvalloc_free_count(alloc: *const Allocator) -> u64 {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_free_huge_count(alloc: *const Allocator) -> u64 {
+pub extern "C" fn llfree_free_huge_count(alloc: *const Allocator) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.free_huge_frames() as u64
     } else {
@@ -161,7 +161,7 @@ pub extern "C" fn nvalloc_free_huge_count(alloc: *const Allocator) -> u64 {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
+pub extern "C" fn llfree_printk(alloc: *const Allocator) {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         warn!("{alloc:?}");
     }
@@ -169,7 +169,7 @@ pub extern "C" fn nvalloc_printk(alloc: *const Allocator) {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_for_each_huge_page(
+pub extern "C" fn llfree_for_each_huge_page(
     alloc: *const Allocator,
     f: extern "C" fn(*mut c_void, u16),
     arg: *mut c_void,
@@ -190,7 +190,7 @@ pub extern "C" fn nvalloc_for_each_huge_page(
 /// This writes into the provided memory buffer which has to be valid.
 #[cold]
 #[no_mangle]
-pub extern "C" fn nvalloc_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
+pub extern "C" fn llfree_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         let mut writer =
             unsafe { RawFormatter::from_ptrs(buf, (buf as usize).saturating_add(len as _) as _) };
@@ -207,7 +207,7 @@ struct LinuxAlloc;
 unsafe impl GlobalAlloc for LinuxAlloc {
     #[cold]
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        nvalloc_linux_alloc(
+        llfree_linux_alloc(
             NODE_ID.load(Ordering::Acquire),
             layout.size() as _,
             layout.align() as _,
@@ -216,7 +216,7 @@ unsafe impl GlobalAlloc for LinuxAlloc {
 
     #[cold]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        nvalloc_linux_free(ptr, layout.size() as _, layout.align() as _);
+        llfree_linux_free(ptr, layout.size() as _, layout.align() as _);
     }
 }
 
@@ -381,7 +381,7 @@ pub mod format_strings {
 #[doc(hidden)]
 pub unsafe fn call_printk(format_string: &[u8; format_strings::LENGTH], args: &Record) {
     // `_printk` does not seem to fail in any path.
-    nvalloc_linux_printk(
+    llfree_linux_printk(
         format_string.as_ptr() as _,
         MOD.as_ptr(),
         args as *const _ as *const c_void,

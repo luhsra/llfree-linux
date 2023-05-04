@@ -1,6 +1,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include "nvalloc.h"
+#include "llfree.h"
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -16,17 +16,17 @@ MODULE_AUTHOR("Lars Wrenger");
 // Functions needed by the allocator
 
 /// Linux provided alloc function
-u8 *nvalloc_linux_alloc(u64 node, u64 size, u64 align)
+u8 *llfree_linux_alloc(u64 node, u64 size, u64 align)
 {
 	return memblock_alloc_node(size, align, node);
 }
 /// Linux provided free function
-void nvalloc_linux_free(u8 *ptr, u64 size, u64 align)
+void llfree_linux_free(u8 *ptr, u64 size, u64 align)
 {
 	memblock_free(ptr, size);
 }
 /// Linux provided printk function
-void nvalloc_linux_printk(const u8 *format, const u8 *module_name,
+void llfree_linux_printk(const u8 *format, const u8 *module_name,
 			  const void *args)
 {
 	_printk(format, module_name, args);
@@ -56,7 +56,7 @@ static void frag_stop(struct seq_file *m, void *arg)
 {
 }
 
-static int nvalloc_show(struct seq_file *m, void *arg)
+static int llfree_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
 	struct zone *zone;
@@ -72,7 +72,7 @@ static int nvalloc_show(struct seq_file *m, void *arg)
 		len = seq_get_buf(m, &buf);
 		if (len > 0) {
 			preempt_disable();
-			len = min(len, (size_t)nvalloc_dump(zone->nvalloc, buf,
+			len = min(len, (size_t)llfree_dump(zone->llfree, buf,
 							    len));
 			preempt_enable();
 			seq_commit(m, len);
@@ -84,30 +84,30 @@ static int nvalloc_show(struct seq_file *m, void *arg)
 	return 0;
 }
 
-static const struct seq_operations nvalloc_op = {
+static const struct seq_operations llfree_op = {
 	.start = frag_start,
 	.next = frag_next,
 	.stop = frag_stop,
-	.show = nvalloc_show,
+	.show = llfree_show,
 };
 
-static int __init nvalloc_init_module(void)
+static int __init llfree_init_module(void)
 {
-	pr_info("Setup nvalloc debugging");
-	proc_create_seq("nvalloc", 0444, NULL, &nvalloc_op);
+	pr_info("Setup llfree debugging");
+	proc_create_seq("llfree", 0444, NULL, &llfree_op);
 	return 0;
 }
 
-static void nvalloc_cleanup_module(void)
+static void llfree_cleanup_module(void)
 {
 	pr_info("uninit\n");
 }
 
-EXPORT_SYMBOL(nvalloc_free_count);
-EXPORT_SYMBOL(nvalloc_free_huge_count);
-EXPORT_SYMBOL(nvalloc_dump);
-EXPORT_SYMBOL(nvalloc_printk);
-EXPORT_SYMBOL(nvalloc_for_each_huge_page);
+EXPORT_SYMBOL(llfree_free_count);
+EXPORT_SYMBOL(llfree_free_huge_count);
+EXPORT_SYMBOL(llfree_dump);
+EXPORT_SYMBOL(llfree_printk);
+EXPORT_SYMBOL(llfree_for_each_huge_page);
 
-module_init(nvalloc_init_module);
-module_exit(nvalloc_cleanup_module);
+module_init(llfree_init_module);
+module_exit(llfree_cleanup_module);

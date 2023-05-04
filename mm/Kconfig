@@ -1125,6 +1125,6 @@ config PTE_MARKER_UFFD_WP
 	  file-backed memory types like shmem and hugetlbfs.
 
 source "mm/damon/Kconfig"
-source "mm/nvalloc/Kconfig"
+source "mm/llfree/Kconfig"
 
 endmenu

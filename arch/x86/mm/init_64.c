@@ -1359,13 +1359,13 @@ void __init mem_init(void)
 
 	/* clear_bss() already clear the empty_zero_page */
 
-#ifdef CONFIG_LL
+#ifdef CONFIG_LLFREE
 	mem_init_llfree();
 #endif
 
 	/* this will put all memory onto the freelists */
 	memblock_free_all();
-#ifdef CONFIG_LL
+#ifdef CONFIG_LLFREE
 	{
 		struct zone *zone;
 		int zid = 0;

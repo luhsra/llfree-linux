@@ -8,7 +8,22 @@ Then the Kernel can be build as usual (with llvm):
 
 ```sh
 make O=build-llfree-vm LLVM=1 #...
+# the resulting kernel can be tested in a vm
 ```
+
+The `build-llfree-deb/.config` can be used to test the kernel on real hardware.
+This config is based on the debian 11 config for the 6.0 Kernel.
+The following commands build and install the kernel and its modules on the local Linux installation.
+
+```sh
+# compile everything
+make O=build-llfree-deb LLVM=1 -j50
+# install it
+make O=build-llfree-deb LLVM=1 -j50 modules_install install
+```
+
+The Kernel can then be chosen via `grub` or a similar boot manager.
+
 
 ## Structure
 
@@ -38,5 +53,3 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
     }
 }
 ```
-
-> Logging is automatically initialized with the allocator.

@@ -15,7 +15,7 @@
  *          (lots of bits borrowed from Ingo Molnar & Andrew Morton)
  */
 
-#include <nvalloc.h>
+#include <llfree.h>
 #include <size_counters.h>
 
 #include <linux/stddef.h>
@@ -160,7 +160,7 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 #define pcpu_task_unpin()	migrate_enable()
 #endif
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /*
  * Generic helper to lookup and a per-cpu variable with an embedded spinlock.
  * Return value should be used with equivalent unlock helper.
@@ -242,7 +242,7 @@ DEFINE_PER_CPU(int, _numa_mem_);		/* Kernel "local memory" node */
 EXPORT_PER_CPU_SYMBOL(_numa_mem_);
 #endif
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 static DEFINE_MUTEX(pcpu_drain_mutex);
 #endif
 
@@ -1021,7 +1021,7 @@ compaction_capture(struct capture_control *capc, struct page *page,
 }
 #endif /* CONFIG_COMPACTION */
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /* Used for pages not on another list */
 static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
@@ -1098,10 +1098,10 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
 {
 	u64 cpu = get_cpu();
-	u64 ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
+	u64 ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
 	put_cpu();
 	if (ret != 0) {
-		pr_err("nvalloc: err %lld", ret);
+		pr_err("llfree: err %lld", ret);
 		VM_BUG_ON_PAGE(true, page);
 	}
 }
@@ -1115,10 +1115,10 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 		__ClearPageReported(page);
 
 	cpu = get_cpu();
-	ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
+	ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
 	put_cpu();
 	if (ret != 0) {
-		pr_err("nvalloc: err %lld", ret);
+		pr_err("llfree: err %lld", ret);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -1126,7 +1126,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	set_page_private(page, 0);
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 /*
  * Freeing function for a buddy system allocator.
@@ -1152,7 +1152,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
  * -- nyc
  */
 
-#ifdef CONFIG_NVALLOC
+#ifdef CONFIG_LLFREE
 static inline void __free_one_page(struct page *page, unsigned long pfn,
 				   struct zone *zone, unsigned int order,
 				   int migratetype, fpi_t fpi_flags)
@@ -1164,18 +1164,18 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	u64 ret, cpu;
 	struct capture_control *capc = task_capc(zone);
 
-	VM_BUG_ON(zone->nvalloc == NULL);
+	VM_BUG_ON(zone->llfree == NULL);
 
 	cpu = get_cpu();
 	if (likely(!is_migrate_isolate(migratetype)) &&
 	    !compaction_capture(capc, page, order, migratetype))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
-	ret = nvalloc_put(zone->nvalloc, cpu, page_to_virt(page), order);
+	ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
 	put_cpu();
 
 	if (ret != 0) {
-		pr_err("nvalloc: err %lld", ret);
+		pr_err("llfree: err %lld", ret);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -1183,7 +1183,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
 		page_reporting_notify_free(order);
 }
-#else // !CONFIG_NVALLOC
+#else // !CONFIG_LLFREE
 static inline void __free_one_page(struct page *page,
 		unsigned long pfn,
 		struct zone *zone, unsigned int order,
@@ -1264,9 +1264,9 @@ done_merging:
 	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
 		page_reporting_notify_free(order);
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /**
  * split_free_page() -- split a free page at split_pfn_offset
  * @free_page:		the original free page
@@ -1329,11 +1329,11 @@ out:
 int split_free_page(struct page *free_page, unsigned int order,
 		    unsigned long split_pfn_offset)
 {
-	// TODO: do we have to implement this for the nvalloc?
-	WARN_ON_ONCE(IS_ENABLED(CONFIG_NVALLOC));
+	// TODO: do we have to implement this for the llfree?
+	WARN_ON_ONCE(IS_ENABLED(CONFIG_LLFREE));
 	return 0;
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 
 /*
@@ -1527,7 +1527,7 @@ static bool free_pages_prepare(struct page *page,
 		for (i = 1; i < (1 << order); i++) {
 			if (compound)
 				bad += free_tail_pages_check(page, page + i);
-			if (!IS_ENABLED(CONFIG_NVALLOC_FAST_FREE) || compound) {
+			if (!IS_ENABLED(CONFIG_LLFREE_FAST_FREE) || compound) {
 				if (unlikely(free_page_is_bad(page + i))) {
 					bad++;
 					continue;
@@ -1589,7 +1589,7 @@ static bool free_pages_prepare(struct page *page,
 	return true;
 }
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 #ifdef CONFIG_DEBUG_VM
 /*
  * With DEBUG_VM enabled, order-0 pages are checked immediately when being freed
@@ -1722,7 +1722,7 @@ static void free_one_page(struct zone *zone,
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 static void __meminit __init_single_page(struct page *page, unsigned long pfn,
 				unsigned long zone, int nid)
@@ -1812,7 +1812,7 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	migratetype = get_pfnblock_migratetype(page, pfn);
 
 	// TODO: why is this called twice?
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	spin_lock_irqsave(&zone->lock, flags);
 	if (unlikely(has_isolate_pageblock(zone) ||
 		     is_migrate_isolate(migratetype))) {
@@ -1827,7 +1827,7 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	}
 #endif
 	__free_one_page(page, pfn, zone, order, migratetype, fpi_flags);
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	spin_unlock_irqrestore(&zone->lock, flags);
 #endif
 
@@ -2451,7 +2451,7 @@ void __init init_cma_reserved_pageblock(struct page *page)
  *
  * -- nyc
  */
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 static inline void expand(struct zone *zone, struct page *page,
 	int low, int high, int migratetype)
 {
@@ -2475,7 +2475,7 @@ static inline void expand(struct zone *zone, struct page *page,
 		set_buddy_order(&page[size], high);
 	}
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 static void check_new_page_bad(struct page *page)
 {
@@ -2662,7 +2662,7 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 		clear_page_pfmemalloc(page);
 }
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /*
  * Go through the free lists for the given migratetype and remove
  * the smallest available page from the freelists
@@ -2692,7 +2692,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 	return NULL;
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 
 /*
@@ -2718,7 +2718,7 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
 					unsigned int order) { return NULL; }
 #endif
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /*
  * Move the free pages in a range to the freelist tail of the requested type.
  * Note that start_page and end_pages are not aligned on a pageblock
@@ -2789,9 +2789,9 @@ int move_freepages_block(struct zone *zone, struct page *page, int migratetype,
 	WARN_ON(true);
 	return 0;
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 
 static void change_pageblock_range(struct page *pageblock_page,
 					int start_order, int migratetype)
@@ -2804,7 +2804,7 @@ static void change_pageblock_range(struct page *pageblock_page,
 	}
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 /*
  * When we are falling back to another migratetype during allocation, try to
@@ -2839,7 +2839,7 @@ static bool can_steal_fallback(unsigned int order, int start_mt)
 	return false;
 }
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 
 static inline bool boost_watermark(struct zone *zone)
 {
@@ -2962,7 +2962,7 @@ single_page:
 	move_to_free_list(page, zone, current_order, start_type);
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 /*
  * Check whether there is a suitable fallback freepage with requested order.
@@ -3001,7 +3001,7 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 	return -1;
 }
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 /*
  * Reserve a pageblock for exclusive use of high-order atomic allocations if
  * there are no empty page blocks that contain a page with a suitable order
@@ -3119,9 +3119,9 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 
 	return false;
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 
 /*
  * Try finding a free buddy page on the fallback list and put it on the free
@@ -3298,7 +3298,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 	return allocated;
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 #ifdef CONFIG_NUMA
 /*
@@ -3308,7 +3308,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
  */
 void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 {
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	int to_drain, batch;
 
 	batch = READ_ONCE(pcp->batch);
@@ -3326,10 +3326,10 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
 #else
-	if (zone->nvalloc) {
+	if (zone->llfree) {
 		int cpu = smp_processor_id();
-		int ret = nvalloc_drain(zone->nvalloc, cpu);
-		BUG_ON(nvalloc_err(ret));
+		int ret = llfree_drain(zone->llfree, cpu);
+		BUG_ON(llfree_err(ret));
 	}
 #endif
 }
@@ -3340,7 +3340,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
  */
 static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 {
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	struct per_cpu_pages *pcp;
 
 	pcp = per_cpu_ptr(zone->per_cpu_pageset, cpu);
@@ -3353,9 +3353,9 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
 #else
-	if (zone->nvalloc) {
-		int ret = nvalloc_drain(zone->nvalloc, cpu);
-		BUG_ON(nvalloc_err(ret));
+	if (zone->llfree) {
+		int ret = llfree_drain(zone->llfree, cpu);
+		BUG_ON(llfree_err(ret));
 	}
 #endif
 }
@@ -3400,7 +3400,7 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 {
 	int cpu;
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	/*
 	 * Allocate in the BSS so we won't require allocation in
 	 * direct reclaim path for CONFIG_CPUMASK_OFFSTACK=y
@@ -3541,7 +3541,7 @@ void mark_free_pages(struct zone *zone)
 }
 #endif /* CONFIG_PM */
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 
 static bool free_unref_page_prepare(struct page *page, unsigned long pfn,
 							unsigned int order)
@@ -3748,7 +3748,7 @@ void free_unref_page_list(struct list_head *list)
 	if (pcp)
 		pcp_spin_unlock_irqrestore(pcp, flags);
 }
-#else // CONFIG_NVALLOC
+#else // CONFIG_LLFREE
 void free_unref_page(struct page *page, unsigned int order)
 {
 	__free_pages_ok(page, order, FPI_NONE);
@@ -3765,7 +3765,7 @@ void free_unref_page_list(struct list_head *list)
 		__free_pages_ok(page, 0, FPI_NONE);
 	}
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 /*
  * split_page takes a non-compound higher-order page, and splits it into
@@ -3789,7 +3789,7 @@ void split_page(struct page *page, unsigned int order)
 }
 EXPORT_SYMBOL_GPL(split_page);
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 int __isolate_free_page(struct page *page, unsigned int order)
 {
 	struct zone *zone = page_zone(page);
@@ -3863,7 +3863,7 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
 {
 	VM_BUG_ON(true);
 }
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 /*
  * Update NUMA hit/miss statistics
@@ -3891,7 +3891,7 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z,
 #endif
 }
 
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 
 static __always_inline
 struct page *rmqueue_buddy(struct zone *preferred_zone, struct zone *zone,
@@ -4063,7 +4063,7 @@ out:
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
 	return page;
 }
-#else // CONFIG_NVALLOC
+#else // CONFIG_LLFREE
 
 /*
  * Allocate a page from the given zone.
@@ -4078,12 +4078,12 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 	u8 *addr;
 
 	cpu = get_cpu();
-	addr = nvalloc_get(zone->nvalloc, cpu, order);
+	addr = llfree_get(zone->llfree, cpu, order);
 
-	if (nvalloc_err((u64)addr)) {
+	if (llfree_err((u64)addr)) {
 		put_cpu();
-		pr_err("nvalloc: err %lld", (u64)addr);
-		BUG_ON((u64)addr != NVALLOC_ERROR_MEMORY);
+		pr_err("llfree: err %lld", (u64)addr);
+		BUG_ON((u64)addr != LLFREE_ERROR_MEMORY);
 	} else {
 		page = virt_to_page(addr);
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
@@ -4102,7 +4102,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 	return page;
 }
 
-#endif // CONFIG_NVALLOC
+#endif // CONFIG_LLFREE
 
 #ifdef CONFIG_FAIL_PAGE_ALLOC
 
@@ -4252,7 +4252,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 	if (!order)
 		return true;
 
-#ifdef CONFIG_NVALLOC
+#ifdef CONFIG_LLFREE
 	return true;
 #endif
 
@@ -4539,7 +4539,7 @@ try_this_zone:
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
 #endif
@@ -5037,7 +5037,7 @@ retry:
 	 * Shrink them and try again
 	 */
 	if (!page && !drained) {
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 		unreserve_highatomic_pageblock(ac, false);
 #endif
 		drain_all_pages(NULL);
@@ -5186,7 +5186,7 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 * Make sure we converge to OOM if we cannot make any progress
 	 * several times in the row.
 	 */
-#ifndef CONFIG_NVALLOC
+#ifndef CONFIG_LLFREE
 	if (*no_progress_loops > MAX_RECLAIM_RETRIES) {
 		/* Before OOM, exhaust highatomic_reserve */
 		return unreserve_highatomic_pageblock(ac, true);
@@ -5617,7 +5617,7 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
  *
  * Returns the number of pages on the list or array.
  */
-#ifdef CONFIG_NVALLOC
+#ifdef CONFIG_LLFREE
 unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 				 nodemask_t *nodemask, int nr_pages,
 				 struct list_head *page_list,
@@ -5640,7 +5640,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	size_counters_bulk_alloc(gfp, nr_populated);
 	return nr_populated;
 }
-#else // CONFIG_NVALLOC
+#else // CONFIG_LLFREE
 unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 			nodemask_t *nodemask, int nr_pages,
 			struct list_head *page_list,

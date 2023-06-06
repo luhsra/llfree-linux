@@ -54,7 +54,7 @@
 #include <linux/string_helpers.h>
 #include "kstrtox.h"
 
-#include <nvalloc.h>
+#include <llfree.h>
 
 /* Disable pointer hashing if requested */
 bool no_hash_pointers __ro_after_init;
@@ -2459,7 +2459,7 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	case 'f':
 		return fwnode_string(buf, end, ptr, spec, fmt + 1);
 	case 'A':
-		if (!IS_ENABLED(CONFIG_RUST) && !IS_ENABLED(CONFIG_NVALLOC)) {
+		if (!IS_ENABLED(CONFIG_RUST) && !IS_ENABLED(CONFIG_LLFREE)) {
 			WARN_ONCE(1, "Please remove %%pA from non-Rust code\n");
 			return error_string(buf, end, "(%pA?)", spec);
 		}

@@ -16,10 +16,10 @@ use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
 use llfree::frame::{Frame, PFNRange, PFN};
-use llfree::lower::Cache;
-use llfree::upper::Init::{Volatile, Recover};
-use llfree::upper::{Alloc, AllocExt, Array};
+use llfree::Alloc;
 use llfree::Error;
+use llfree::Init::{Recover, Volatile};
+use llfree::LLFree;
 
 const MOD: &[u8] = b"llfree\0";
 
@@ -31,9 +31,6 @@ extern "C" {
     /// Linux provided printk function
     fn llfree_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
 }
-
-type Lower = Cache<32>;
-type Allocator = Array<3, Lower>;
 
 static NODE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -67,11 +64,11 @@ pub extern "C" fn llfree_init(
         let pfn = PFN::from_ptr(start.cast());
         let area = pfn..pfn.off(pages as _);
 
-        match Allocator::new(cores as _, area.clone(), init, free_all) {
+        match LLFree::new(cores as _, area.clone(), init, free_all) {
             Ok(alloc) => {
                 warn!("setup mem={:?} ({})", area.as_ptr_range(), alloc.frames());
                 // Move to newly allocated memory and leak address
-                Box::leak(Box::new(alloc)) as *mut Allocator as _
+                Box::leak(Box::new(alloc)) as *mut LLFree as _
             }
             Err(e) => e as usize as _,
         }
@@ -83,15 +80,15 @@ pub extern "C" fn llfree_init(
 /// Shut down the allocator normally.
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_uninit(alloc: *mut Allocator) {
+pub extern "C" fn llfree_uninit(alloc: *mut LLFree) {
     if !alloc.is_null() {
-        unsafe { core::mem::drop(Box::from_raw(alloc as *mut Allocator)) };
+        unsafe { core::mem::drop(Box::from_raw(alloc as *mut LLFree)) };
     }
 }
 
 /// Allocates 2^order pages. Returns >=PAGE_SIZE on success an error code.
 #[no_mangle]
-pub extern "C" fn llfree_get(alloc: *const Allocator, core: u32, order: u32) -> *mut u8 {
+pub extern "C" fn llfree_get(alloc: *const LLFree, core: u32, order: u32) -> *mut u8 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.get(core as _, order as _) {
             Ok(addr) => addr.as_ptr_mut().cast(),
@@ -104,12 +101,7 @@ pub extern "C" fn llfree_get(alloc: *const Allocator, core: u32, order: u32) -> 
 
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 #[no_mangle]
-pub extern "C" fn llfree_put(
-    alloc: *const Allocator,
-    core: u32,
-    addr: *mut u8,
-    order: u32,
-) -> u64 {
+pub extern "C" fn llfree_put(alloc: *const LLFree, core: u32, addr: *mut u8, order: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.put(core as _, PFN::from_ptr(addr.cast()), order as _) {
             Ok(_) => 0,
@@ -121,7 +113,7 @@ pub extern "C" fn llfree_put(
 }
 
 #[no_mangle]
-pub extern "C" fn llfree_drain(alloc: *const Allocator, core: u32) -> u64 {
+pub extern "C" fn llfree_drain(alloc: *const LLFree, core: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         match alloc.drain(core as _) {
             Ok(_) => 0,
@@ -133,7 +125,7 @@ pub extern "C" fn llfree_drain(alloc: *const Allocator, core: u32) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn llfree_is_free(alloc: *const Allocator, addr: *mut u8, order: u32) -> u64 {
+pub extern "C" fn llfree_is_free(alloc: *const LLFree, addr: *mut u8, order: u32) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.is_free(PFN::from_ptr(addr.cast()), order as _) as _
     } else {
@@ -143,7 +135,7 @@ pub extern "C" fn llfree_is_free(alloc: *const Allocator, addr: *mut u8, order: 
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_free_count(alloc: *const Allocator) -> u64 {
+pub extern "C" fn llfree_free_count(alloc: *const LLFree) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.free_frames() as u64
     } else {
@@ -153,7 +145,7 @@ pub extern "C" fn llfree_free_count(alloc: *const Allocator) -> u64 {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_free_huge_count(alloc: *const Allocator) -> u64 {
+pub extern "C" fn llfree_free_huge_count(alloc: *const LLFree) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         alloc.free_huge_frames() as u64
     } else {
@@ -163,7 +155,7 @@ pub extern "C" fn llfree_free_huge_count(alloc: *const Allocator) -> u64 {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_printk(alloc: *const Allocator) {
+pub extern "C" fn llfree_printk(alloc: *const LLFree) {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         warn!("{alloc:?}");
     }
@@ -172,19 +164,12 @@ pub extern "C" fn llfree_printk(alloc: *const Allocator) {
 #[cold]
 #[no_mangle]
 pub extern "C" fn llfree_for_each_huge_page(
-    alloc: *const Allocator,
+    alloc: *const LLFree,
     f: extern "C" fn(*mut c_void, u16),
     arg: *mut c_void,
 ) {
-    type CTX = (extern "C" fn(*mut c_void, u16), *mut c_void);
-
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        let mut ctx: CTX = (f, arg);
-        alloc.for_each_huge_frame((&mut ctx) as *mut CTX as _, |ctx, _, free| {
-            // SAFETY: ctx outlives this callback
-            let (f, arg) = unsafe { *ctx.cast::<CTX>() };
-            f(arg, free as _)
-        });
+        alloc.for_each_huge_frame(|_, free| f(arg, free as _))
     }
 }
 
@@ -192,7 +177,7 @@ pub extern "C" fn llfree_for_each_huge_page(
 /// This writes into the provided memory buffer which has to be valid.
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_dump(alloc: *const Allocator, buf: *mut u8, len: u64) -> u64 {
+pub extern "C" fn llfree_dump(alloc: *const LLFree, buf: *mut u8, len: u64) -> u64 {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         let mut writer =
             unsafe { RawFormatter::from_ptrs(buf, (buf as usize).saturating_add(len as _) as _) };

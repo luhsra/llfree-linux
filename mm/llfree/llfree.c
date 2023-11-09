@@ -1,6 +1,6 @@
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
+#include "platform.h"
 #include "llfree.h"
+#include "llfree_inner.h"
 
 #include <linux/align.h>
 #include <linux/bug.h>
@@ -15,26 +15,39 @@
 #include <linux/dax.h>
 
 MODULE_LICENSE("MIT");
-MODULE_DESCRIPTION("NVM Allocator");
+MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
 // Functions needed by the allocator
+static _Atomic(u64) NODE = 0;
 
-/// Linux provided alloc function
-u8 *llfree_linux_alloc(u64 node, u64 size, u64 align)
+/// Allocate metadata function
+void *llfree_ext_alloc(size_t align, size_t size)
 {
+	u64 node = atom_load(&NODE);
 	return memblock_alloc_node(size, align, node);
 }
-/// Linux provided free function
-void llfree_linux_free(u8 *ptr, u64 size, u64 align)
+/// Free metadata function
+void llfree_ext_free(size_t align, size_t size, void *addr)
 {
-	memblock_free(ptr, size);
+	(void)align;
+	memblock_free(addr, size);
 }
-/// Linux provided printk function
-void llfree_linux_printk(const u8 *format, const u8 *module_name,
-			  const void *args)
+
+llfree_t *llfree_node_init(size_t node, size_t cores, bool persistent,
+			   void *start, size_t pages)
 {
-	_printk(format, module_name, args);
+	// this allows us to allocate our metadata also on this node
+	atom_store(&NODE, node);
+
+	llfree_t *self = llfree_ext_alloc(LLFREE_CACHE_SIZE, sizeof(llfree_t));
+	llfree_result_t res = llfree_init(self, cores,
+					  (uint64_t)start / LLFREE_FRAME_SIZE,
+					  pages, LLFREE_INIT_VOLATILE, false);
+
+	BUG_ON(!llfree_result_ok(res));
+
+	return self;
 }
 
 static void *frag_start(struct seq_file *m, loff_t *pos)
@@ -77,8 +90,8 @@ static int llfree_show(struct seq_file *m, void *arg)
 		len = seq_get_buf(m, &buf);
 		if (len > 0) {
 			preempt_disable();
-			len = min(len, (size_t)llfree_dump(zone->llfree, buf,
-							    len));
+			// len = min(len,
+			// 	  (size_t)llfree_dump(zone->llfree, buf, len));
 			preempt_enable();
 			seq_commit(m, len);
 		} else {
@@ -104,7 +117,8 @@ static int __init llfree_init_module(void)
 }
 module_init(llfree_init_module);
 
-static __init int find_dax_init(void) {
+static __init int find_dax_init(void)
+{
 	dev_t dax_id = MKDEV(252, 0); // /dev/dax0.0
 	struct device *dax_dev;
 	u8 *dax_begin;
@@ -125,11 +139,11 @@ static __init int find_dax_init(void) {
 
 	BUG_ON(!IS_ALIGNED((size_t)dax_begin, HPAGE_SIZE));
 
-	llfree = llfree_init(0, num_online_cpus(), true, dax_begin,
-			       dax_len / PAGE_SIZE);
-	BUG_ON(llfree_err((u64)llfree));
+	llfree = llfree_node_init(0, num_online_cpus(), true, dax_begin,
+				  dax_len / PAGE_SIZE);
+	BUG_ON(llfree == NULL);
 
-	llfree_printk(llfree);
+	// llfree_print(llfree);
 
 	return 0;
 }
@@ -141,8 +155,8 @@ static void llfree_cleanup_module(void)
 }
 module_exit(llfree_cleanup_module);
 
-EXPORT_SYMBOL(llfree_free_count);
-EXPORT_SYMBOL(llfree_free_huge_count);
-EXPORT_SYMBOL(llfree_dump);
-EXPORT_SYMBOL(llfree_printk);
-EXPORT_SYMBOL(llfree_for_each_huge_page);
+EXPORT_SYMBOL(llfree_free_frames);
+EXPORT_SYMBOL(llfree_free_huge);
+// EXPORT_SYMBOL(llfree_dump);
+// EXPORT_SYMBOL(llfree_print);
+EXPORT_SYMBOL(llfree_for_each_huge);

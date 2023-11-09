@@ -6,7 +6,7 @@
 
 // Count different allocation sizes
 struct size_counters {
-	u64 c[3][MAX_ORDER];
+	u64 c[3][LLFREE_MAX_ORDER];
 	u64 bulk[3];
 };
 static DEFINE_PER_CPU(struct size_counters, size_counters);
@@ -79,7 +79,7 @@ static ssize_t size_counters_show(struct kobject *kobj,
 
 	// csv body
 	for (size_t o = 0; o < sizeof(ops) / sizeof(*ops); o++) {
-		for (size_t order = 0; order < MAX_ORDER; order++) {
+		for (size_t order = 0; order < LLFREE_MAX_ORDER; order++) {
 			u64 count = 0;
 			u64 bulk = 0;
 			size_t cpu;

@@ -1,6 +1,4 @@
 #include "platform.h"
-#include "llfree.h"
-#include "llfree_inner.h"
 
 #include <linux/align.h>
 #include <linux/bug.h>
@@ -13,6 +11,9 @@
 #include <linux/device.h>
 #include <linux/kdev_t.h>
 #include <linux/dax.h>
+
+#include "llfree.h"
+#include "llfree_inner.h"
 
 MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
@@ -35,15 +36,19 @@ void llfree_ext_free(size_t align, size_t size, void *addr)
 }
 
 llfree_t *llfree_node_init(size_t node, size_t cores, bool persistent,
-			   void *start, size_t pages)
+			   u64 start_pfn, size_t pages)
 {
 	// this allows us to allocate our metadata also on this node
 	atom_store(&NODE, node);
 
+	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
+	pages += start_pfn - offset; // correct length
+
+	pr_info("node=%u, offset=%u, pages=%u", node, offset, pages);
+
 	llfree_t *self = llfree_ext_alloc(LLFREE_CACHE_SIZE, sizeof(llfree_t));
-	llfree_result_t res = llfree_init(self, cores,
-					  (uint64_t)start / LLFREE_FRAME_SIZE,
-					  pages, LLFREE_INIT_VOLATILE, false);
+	llfree_result_t res = llfree_init(self, cores, offset, pages,
+					  LLFREE_INIT_VOLATILE, false);
 
 	BUG_ON(!llfree_result_ok(res));
 
@@ -81,23 +86,33 @@ static int llfree_show(struct seq_file *m, void *arg)
 	struct zone *node_zones = pgdat->node_zones;
 
 	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
-		char *buf;
-		size_t len;
+		// char *buf;
+		// size_t len;
+		llfree_t *llfree = zone->llfree;
 
 		if (!populated_zone(zone))
 			continue;
 
-		len = seq_get_buf(m, &buf);
-		if (len > 0) {
-			preempt_disable();
-			// len = min(len,
-			// 	  (size_t)llfree_dump(zone->llfree, buf, len));
-			preempt_enable();
-			seq_commit(m, len);
-		} else {
-			seq_commit(m, -1);
-			pr_err("buf empty\n");
-		}
+		preempt_disable();
+		seq_printf(m,
+			   "LLC { frames: %" PRIdS "/%" PRIuS ", huge: %" PRIuS
+			   "/%" PRIuS " }\n",
+			   llfree_free_frames(llfree), llfree->lower.frames,
+			   lower_free_huge(&llfree->lower),
+			   llfree->lower.childs_len);
+		preempt_enable();
+
+		// len = seq_get_buf(m, &buf);
+		// if (len > 0) {
+		// 	preempt_disable();
+		// 	// len = min(len,
+		// 	// 	  (size_t)llfree_dump(zone->llfree, buf, len));
+		// 	preempt_enable();
+		// 	seq_commit(m, len);
+		// } else {
+		// 	seq_commit(m, -1);
+		// 	pr_err("buf empty\n");
+		// }
 	}
 	return 0;
 }
@@ -139,7 +154,8 @@ static __init int find_dax_init(void)
 
 	BUG_ON(!IS_ALIGNED((size_t)dax_begin, HPAGE_SIZE));
 
-	llfree = llfree_node_init(0, num_online_cpus(), true, dax_begin,
+	llfree = llfree_node_init(0, num_online_cpus(), true,
+				  page_to_pfn(virt_to_page(dax_begin)),
 				  dax_len / PAGE_SIZE);
 	BUG_ON(llfree == NULL);
 

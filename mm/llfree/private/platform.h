@@ -12,6 +12,9 @@
 #define PRIu64 "u"
 #define PRIx64 "x"
 #define PRId64 "d"
+#define PRIuS "u"
+#define PRIdS "d"
+#define PRIxS "x"
 
 /// Number of Bytes in cacheline
 #define LLFREE_CACHE_SIZE 64u
@@ -128,7 +131,7 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 /// if (!atom_update(&my_atomic, old, my_update, false, 42)) {
 /// 	assert(!"our my_update function returned false, cancelling the update");
 /// }
-/// printf("old value %ju\n", old);
+/// printf("old value %u\n", old);
 /// ```
 #define atom_update(atom_ptr, old_val, fn, ...)                            \
 	({                                                                 \

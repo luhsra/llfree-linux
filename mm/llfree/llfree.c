@@ -50,7 +50,7 @@ llfree_t *llfree_node_init(size_t node, size_t cores, bool persistent,
 	llfree_result_t res = llfree_init(self, cores, offset, pages,
 					  LLFREE_INIT_VOLATILE, false);
 
-	BUG_ON(!llfree_result_ok(res));
+	BUG_ON(!llfree_ok(res));
 
 	return self;
 }

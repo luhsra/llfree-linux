@@ -1100,7 +1100,7 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	u64 cpu = get_cpu();
 	llfree_result_t ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
 	put_cpu();
-	if (!llfree_result_ok(ret)) {
+	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1118,7 +1118,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
 	put_cpu();
-	if (!llfree_result_ok(ret)) {
+	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1176,7 +1176,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
 	put_cpu();
 
-	if (!llfree_result_ok(ret)) {
+	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -3331,7 +3331,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 	if (zone->llfree) {
 		int cpu = smp_processor_id();
 		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
-		BUG_ON(!llfree_result_ok(ret));
+		BUG_ON(!llfree_ok(ret));
 	}
 #endif
 }
@@ -3357,7 +3357,7 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 #else
 	if (zone->llfree) {
 		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
-		BUG_ON(!llfree_result_ok(ret));
+		BUG_ON(!llfree_ok(ret));
 	}
 #endif
 }
@@ -4082,7 +4082,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 	cpu = get_cpu();
 	res = llfree_get(zone->llfree, cpu, order);
 
-	if (!llfree_result_ok(res)) {
+	if (!llfree_ok(res)) {
 		put_cpu();
 		pr_err("llfree: err %lld", res.val);
 		BUG_ON(res.val != LLFREE_ERR_MEMORY);

@@ -1664,7 +1664,12 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 		untrack_pfn(vma, 0, 0);
 
 	if (start != end) {
-		if (unlikely(is_vm_hugetlb_page(vma))) {
+		if (vma->vm_ops && vma->vm_ops->munmap) {
+			/*
+			 * Let the vma handle its unmapping on his own.
+			 */
+			vma->vm_ops->munmap(vma);
+		} else if (unlikely(is_vm_hugetlb_page(vma))) {
 			/*
 			 * It is undesirable to test vma->vm_file as it
 			 * should be non-null for valid hugetlb area.

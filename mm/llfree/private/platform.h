@@ -9,12 +9,11 @@
 #include <asm/pgtable_types.h>
 
 #define UINT64_MAX 0xffffffffffffffffllu
-#define PRIu64 "u"
-#define PRIx64 "x"
-#define PRId64 "d"
-#define PRIuS "u"
-#define PRIdS "d"
-#define PRIxS "x"
+#define PRIu64 "llu"
+#define PRIx64 "llx"
+#define PRId64 "lld"
+#define PRIuS "zu"
+#define PRIxS "zx"
 
 /// Number of Bytes in cacheline
 #define LLFREE_CACHE_SIZE 64u
@@ -66,49 +65,50 @@ static const int ATOM_UPDATE_ORDER = __ATOMIC_ACQ_REL;
 static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 
 /* GCC compatibility */
-#ifdef __GNUC__
+#if !defined(__clang__) && defined(__GNUC__)
 
-#define __c11_atomic_compare_exchange_strong(obj, expected, desired, order_success, order_failure) \
-	__extension__								\
-	({									\
-		__auto_type __atomic_compare_exchange_ptr = (obj);			\
-		__typeof__ ((void)0, *__atomic_compare_exchange_ptr) __atomic_compare_exchange_tmp \
-			= (desired);								\
-		__atomic_compare_exchange (__atomic_compare_exchange_ptr, (expected),	\
-						 &__atomic_compare_exchange_tmp, 0,	\
-						 (order_success), (order_failure));				\
+#define __c11_atomic_compare_exchange_strong(obj, expected, desired,         \
+					     order_success, order_failure)   \
+	__extension__({                                                      \
+		__auto_type __atomic_compare_exchange_ptr = (obj);           \
+		__typeof__((void)0, *__atomic_compare_exchange_ptr)          \
+			__atomic_compare_exchange_tmp = (desired);           \
+		__atomic_compare_exchange(__atomic_compare_exchange_ptr,     \
+					  (expected),                        \
+					  &__atomic_compare_exchange_tmp, 0, \
+					  (order_success), (order_failure)); \
 	})
 
-#define __c11_atomic_load(obj, order) \
-	__extension__								\
-	({									\
-		__auto_type __atomic_load_ptr = (obj);				\
-		__typeof__ ((void)0, *__atomic_load_ptr) __atomic_load_tmp;			\
-		__atomic_load (__atomic_load_ptr, &__atomic_load_tmp, (order));	\
-		__atomic_load_tmp;							\
+#define __c11_atomic_load(obj, order)                                          \
+	__extension__({                                                        \
+		__auto_type __atomic_load_ptr = (obj);                         \
+		__typeof__((void)0, *__atomic_load_ptr) __atomic_load_tmp;     \
+		__atomic_load(__atomic_load_ptr, &__atomic_load_tmp, (order)); \
+		__atomic_load_tmp;                                             \
 	})
 
-#define __c11_atomic_store(obj, val, order) \
-	__extension__								\
-	({									\
-		__auto_type __atomic_store_ptr = (obj);				\
-		__typeof__ ((void)0, *__atomic_store_ptr) __atomic_store_tmp = (val);	\
-		__atomic_store (__atomic_store_ptr, &__atomic_store_tmp, (order));	\
+#define __c11_atomic_store(obj, val, order)                                   \
+	__extension__({                                                       \
+		__auto_type __atomic_store_ptr = (obj);                       \
+		__typeof__((void)0, *__atomic_store_ptr) __atomic_store_tmp = \
+			(val);                                                \
+		__atomic_store(__atomic_store_ptr, &__atomic_store_tmp,       \
+			       (order));                                      \
 	})
 
-#define __c11_atomic_compare_exchange_weak(obj, expected, desired, order_success, order_failure) \
-	__extension__								\
-	({									\
-		__auto_type __atomic_compare_exchange_ptr = (obj);			\
-		__typeof__ ((void)0, *__atomic_compare_exchange_ptr) __atomic_compare_exchange_tmp \
-			= (desired);								\
-		__atomic_compare_exchange (__atomic_compare_exchange_ptr, (expected),	\
-						 &__atomic_compare_exchange_tmp, 1,	\
-						 (order_success), (order_failure));				\
+#define __c11_atomic_compare_exchange_weak(obj, expected, desired,           \
+					   order_success, order_failure)     \
+	__extension__({                                                      \
+		__auto_type __atomic_compare_exchange_ptr = (obj);           \
+		__typeof__((void)0, *__atomic_compare_exchange_ptr)          \
+			__atomic_compare_exchange_tmp = (desired);           \
+		__atomic_compare_exchange(__atomic_compare_exchange_ptr,     \
+					  (expected),                        \
+					  &__atomic_compare_exchange_tmp, 1, \
+					  (order_success), (order_failure)); \
 	})
 
-#endif	/* __GNUC__ */
-
+#endif
 
 /// Iterates over a Range between multiples of len starting at idx.
 ///

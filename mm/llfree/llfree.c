@@ -44,7 +44,8 @@ llfree_t *llfree_node_init(size_t node, size_t cores, bool persistent,
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
-	pr_info("node=%u, offset=%u, pages=%u", node, offset, pages);
+	pr_info("node=%" PRIuS ", offset=%" PRIu64 ", pages=%" PRIuS, node,
+		offset, pages);
 
 	llfree_t *self = llfree_ext_alloc(LLFREE_CACHE_SIZE, sizeof(llfree_t));
 	llfree_result_t res = llfree_init(self, cores, offset, pages,
@@ -95,7 +96,7 @@ static int llfree_show(struct seq_file *m, void *arg)
 
 		preempt_disable();
 		seq_printf(m,
-			   "LLC { frames: %" PRIdS "/%" PRIuS ", huge: %" PRIuS
+			   "LLC { frames: %" PRIuS "/%" PRIuS ", huge: %" PRIuS
 			   "/%" PRIuS " }\n",
 			   llfree_free_frames(llfree), llfree->lower.frames,
 			   lower_free_huge(&llfree->lower),

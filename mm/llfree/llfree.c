@@ -19,37 +19,26 @@ MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
-// Functions needed by the allocator
-static _Atomic(u64) NODE = 0;
-
-/// Allocate metadata function
-void *llfree_ext_alloc(size_t align, size_t size)
+llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
+			   size_t pages)
 {
-	u64 node = atom_load(&NODE);
-	return memblock_alloc_node(size, align, node);
-}
-/// Free metadata function
-void llfree_ext_free(size_t align, size_t size, void *addr)
-{
-	(void)align;
-	memblock_free(addr, size);
-}
-
-llfree_t *llfree_node_init(size_t node, size_t cores, bool persistent,
-			   u64 start_pfn, size_t pages)
-{
-	// this allows us to allocate our metadata also on this node
-	atom_store(&NODE, node);
-
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
 	pr_info("node=%" PRIuS ", offset=%" PRIu64 ", pages=%" PRIuS, node,
 		offset, pages);
 
-	llfree_t *self = llfree_ext_alloc(LLFREE_CACHE_SIZE, sizeof(llfree_t));
-	llfree_result_t res = llfree_init(self, cores, offset, pages,
-					  LLFREE_INIT_VOLATILE, false);
+	llfree_t *self =
+		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
+
+	llfree_meta_size_t m = llfree_metadata_size(cores, pages);
+	u8 *primary = memblock_alloc_node(m.primary, LLFREE_CACHE_SIZE, node);
+	u8 *secondary =
+		memblock_alloc_node(m.secondary, LLFREE_CACHE_SIZE, node);
+	BUG_ON(primary == NULL || secondary == NULL);
+
+	llfree_result_t res = llfree_init(self, cores, pages, LLFREE_INIT_ALLOC,
+					  primary, secondary);
 
 	BUG_ON(!llfree_ok(res));
 
@@ -155,7 +144,8 @@ static __init int find_dax_init(void)
 
 	BUG_ON(!IS_ALIGNED((size_t)dax_begin, HPAGE_SIZE));
 
-	llfree = llfree_node_init(0, num_online_cpus(), true,
+	// TODO: find old metadata
+	llfree = llfree_node_init(0, num_online_cpus(),
 				  page_to_pfn(virt_to_page(dax_begin)),
 				  dax_len / PAGE_SIZE);
 	BUG_ON(llfree == NULL);

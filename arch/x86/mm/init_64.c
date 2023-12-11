@@ -1339,9 +1339,10 @@ void __init mem_init_llfree(void)
 	for_each_populated_zone(zone) {
 		llfree_t *llfree;
 
-		pr_info("llfree: init on %u cpus", num_possible_cpus());
+		pr_info("llfree: init on %u cpus (start %x)",
+			num_possible_cpus(), zone->zone_start_pfn);
 		llfree = llfree_node_init(zone->node, num_possible_cpus(),
-					  false, zone->zone_start_pfn,
+					  zone->zone_start_pfn,
 					  zone->spanned_pages);
 		if (llfree == NULL) {
 			pr_err("llfree: init failure");

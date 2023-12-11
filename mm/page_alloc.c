@@ -1097,8 +1097,12 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
 {
+	llfree_result_t ret;
 	u64 cpu = get_cpu();
-	llfree_result_t ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
+	s64 frame = page_to_pfn(page) -
+		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
@@ -1111,12 +1115,16 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 {
 	llfree_result_t ret;
 	u64 cpu;
+	s64 frame;
 	/* clear reported state and update reported page count */
 	if (page_reported(page))
 		__ClearPageReported(page);
 
 	cpu = get_cpu();
-	ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
+	frame = page_to_pfn(page) -
+		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
@@ -1164,6 +1172,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	// fpi_flags: buddy alloc specific (free notifications, list opt, kasan poisioning)
 	llfree_result_t ret;
 	u64 cpu;
+	s64 frame;
 	struct capture_control *capc = task_capc(zone);
 
 	VM_BUG_ON(zone->llfree == NULL);
@@ -1173,7 +1182,11 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	    !compaction_capture(capc, page, order, migratetype))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
-	ret = llfree_put(zone->llfree, cpu, page_to_pfn(page), order);
+	frame = page_to_pfn(page) -
+		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
+
 	put_cpu();
 
 	if (!llfree_ok(ret)) {
@@ -4087,7 +4100,9 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		pr_err("llfree: err %lld", res.val);
 		BUG_ON(res.val != LLFREE_ERR_MEMORY);
 	} else {
-		page = pfn_to_page(res.val);
+		size_t offset =
+			ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		page = pfn_to_page(offset + res.val);
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);

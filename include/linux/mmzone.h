@@ -874,10 +874,10 @@ struct zone {
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
 
-	#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	atomic_long_t vm_stat_llfree_huge_pages;
-  struct mutex auto_deflate_lock;
-	#endif
+	spinlock_t auto_deflate_lock;
+#endif
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {
@@ -1310,11 +1310,12 @@ static inline bool zone_is_zone_device(struct zone *zone)
 #endif
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-static inline int32_t zone_get_type(struct zone *zone) {
+static inline int32_t zone_get_type(struct zone *zone)
+{
 	struct pglist_data *node;
-	node = zone->zone_pgdat;	
+	node = zone->zone_pgdat;
 
-	for(uint32_t i = 0; i < MAX_NR_ZONES; i++) {
+	for (uint32_t i = 0; i < MAX_NR_ZONES; i++) {
 		if (&node->node_zones[i] == zone) {
 			return i;
 		}
@@ -1340,6 +1341,17 @@ static inline bool populated_zone(struct zone *zone)
 {
 	return zone->present_pages;
 }
+
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
+static inline bool inflated_zone(struct zone *zone)
+{
+	if (atomic_long_read(&zone->vm_stat_llfree_huge_pages) > 0) {
+		return true;
+	}
+
+	return false;
+}
+#endif
 
 #ifdef CONFIG_NUMA
 static inline int zone_to_nid(struct zone *zone)

@@ -7407,6 +7407,12 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 	if (!cpuset_zone_allowed(zone, gfp_flags))
 		return;
 
+  #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
+  if (inflated_zone(zone)) {
+    printk(KERN_WARNING "but return early because zone is inflated\n");
+    return;
+  }
+  #endif
 	pgdat = zone->zone_pgdat;
 	curr_idx = READ_ONCE(pgdat->kswapd_highest_zoneidx);
 

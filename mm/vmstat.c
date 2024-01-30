@@ -1224,6 +1224,9 @@ int fragmentation_index(struct zone *zone, unsigned int order)
 const char * const vmstat_text[] = {
 	/* enum zone_stat_item counters */
 	"nr_free_pages",
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON
+	"nr_inflated_huge_pages",
+#endif
 	"nr_zone_inactive_anon",
 	"nr_zone_active_anon",
 	"nr_zone_inactive_file",

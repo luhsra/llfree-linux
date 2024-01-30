@@ -4128,7 +4128,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 
 	// check again due to huge page fragmentation...
 	if ((res.val == LLFREE_ERR_MEMORY) &&
-	    (atomic_long_read(&zone->vm_stat_llfree_huge_pages) > 0)) {
+	    (zone_page_state(zone, NR_INFLATED_HUGE_PAGES) > 0)) {
 		virtio_llfree_auto_deflate(zone);
 		res = llfree_get(zone->llfree, cpu, llf);
 	}
@@ -4552,7 +4552,7 @@ retry:
 		mark = high_wmark_pages(zone);
 		if (!zone_watermark_ok(zone, order, mark, ac->highest_zoneidx,
 				       alloc_flags) &&
-		    (atomic_long_read(&zone->vm_stat_llfree_huge_pages) > 0)) {
+		    (zone_page_state(zone, NR_INFLATED_HUGE_PAGES) > 0)) {
 			virtio_llfree_auto_deflate(zone);
 		}
 #endif

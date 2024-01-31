@@ -126,7 +126,8 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 		vb->qemu_info.zone_free_pages =
 			(_Atomic(int64_t) *)&zone->vm_stat[NR_FREE_PAGES];
 		vb->qemu_info.zone_llfree_huge_page_counter =
-			(_Atomic(int64_t) *)&zone->vm_stat_llfree_huge_pages;
+			(_Atomic(int64_t) *)&zone
+				->vm_stat[NR_INFLATED_HUGE_PAGES];
 		vb->qemu_info.num_pagecache_reclaimable_pages =
 			(_Atomic(int64_t) *)&zone->zone_pgdat
 				->vm_stat[NR_FILE_PAGES];
@@ -355,7 +356,6 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 {
 	struct virtio_llfree_balloon *vb;
 	int err;
-	uint32_t num_cores;
 
 	if (!vdev->config->get) {
 		dev_err(&vdev->dev, "%s failure: config access disabled\n",
@@ -389,6 +389,7 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+		uint32_t num_cores;
 		num_cores = num_online_cpus();
 		vb->auto_deflate_info = kzalloc(
 			sizeof(AutoDeflateInfo *) * num_cores, GFP_KERNEL);

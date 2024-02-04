@@ -208,13 +208,14 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 			     vb_llfree, GFP_KERNEL);
 	virtqueue_kick(vb_llfree->llfree_auto_deflate_vqs[core]);
 
-	// busy wait for virtio device
 	// we can't sleep in this context
+	// busy wait for virtio device
+	// technically only needed when using ioventfd as transport,
+	// but we always need to get the buffer
 	while (!virtqueue_get_buf(vb_llfree->llfree_auto_deflate_vqs[core],
 				  &len) &&
 	       !virtqueue_is_broken(vb_llfree->llfree_auto_deflate_vqs[core]))
 		cpu_relax();
-
 	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
 }
 EXPORT_SYMBOL(virtio_llfree_auto_deflate);

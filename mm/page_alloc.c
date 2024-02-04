@@ -4138,9 +4138,9 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 
 	if (!llfree_ok(res)) {
 		put_cpu();
-		pr_err("llfree thread %u: error %lld", current->pid, res.val);
-		pr_err("nr_free_pages left in zone: %li",
-		       atomic_long_read(&zone->vm_stat[NR_FREE_PAGES]));
+		// pr_err("llfree thread %u: error %lld", current->pid, res.val);
+		// pr_err("nr_free_pages left in zone: %li",
+		//        atomic_long_read(&zone->vm_stat[NR_FREE_PAGES]));
 		BUG_ON(res.val != LLFREE_ERR_MEMORY);
 	} else {
 		size_t offset;

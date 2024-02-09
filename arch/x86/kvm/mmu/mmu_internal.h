@@ -256,6 +256,9 @@ enum {
 	RET_PF_SPURIOUS,
 };
 
+int kvm_mmu_map_page(struct kvm_vcpu *vcpu, gpa_t gpa, u32 err,
+			 int max_level);
+
 static inline int kvm_mmu_do_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 					u32 err, bool prefetch)
 {

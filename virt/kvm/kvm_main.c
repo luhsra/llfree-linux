@@ -2042,6 +2042,42 @@ static int kvm_vm_ioctl_set_memory_region(struct kvm *kvm,
 	return kvm_set_memory_region(kvm, mem);
 }
 
+static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
+					  struct kvm_map_region *map_region)
+{
+//
+// 	struct kvm_vcpu *vcpu;
+// 	struct page *page;
+// 	u64 error_code;
+// 	int idx, ret = 0;
+// 	bool added = false;
+//
+// 	if (!atomic_read(&kvm->online_vcpus))
+// 		return -EINVAL;
+//
+// 	/* Sanity check */
+// 	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
+// 	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) ||
+// 	    !map_region->nr_pages ||
+// 	    map_region->nr_pages & GENMASK_ULL(63, 63 - PAGE_SHIFT) ||
+// 	    map_region->gpa + (map_region->nr_pages << PAGE_SHIFT) <= map_region->gpa) {
+// 		return -EINVAL;
+//   }
+//
+//   vcpu = kvm_get_vcpu(kvm, 0);
+//   if (mutex_lock_killable(&vcpu->mutex))
+//     return -EINTR;
+//
+//   vcpu_load(vcpu);
+//   idx = srcu_read_lock(&kvm->srcu);
+//
+// 	kvm_mmu_reload(vcpu);
+//
+//   kvm_mmu
+//
+  return 0;
+
+}
 #ifndef CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
 /**
  * kvm_get_dirty_log - get a snapshot of dirty pages
@@ -4695,6 +4731,17 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = kvm_vm_ioctl_set_memory_region(kvm, &kvm_userspace_mem);
 		break;
 	}
+  case KVM_MAP_GFN_RANGE: {
+    struct kvm_map_region map_region;
+
+		r = -EFAULT;
+		if (copy_from_user(&map_region, argp,
+						sizeof(map_region)))
+			goto out;
+   
+    r = kvm_vm_ioctl_map_memory_region(kvm, &map_region);
+    break;
+  }
 	case KVM_GET_DIRTY_LOG: {
 		struct kvm_dirty_log log;
 

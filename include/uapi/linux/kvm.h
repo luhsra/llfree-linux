@@ -1437,6 +1437,12 @@ struct kvm_vfio_spapr_tce {
 	__s32	tablefd;
 };
 
+struct kvm_map_region {
+	__u64 source_addr;
+	__u64 gpa;
+	__u64 nr_pages;
+};
+
 /*
  * ioctls for VM fds
  */
@@ -1455,6 +1461,7 @@ struct kvm_vfio_spapr_tce {
 					struct kvm_userspace_memory_region)
 #define KVM_SET_TSS_ADDR          _IO(KVMIO,   0x47)
 #define KVM_SET_IDENTITY_MAP_ADDR _IOW(KVMIO,  0x48, __u64)
+#define KVM_MAP_GFN_RANGE         _IOW(KVMIO,  0x49, struct kvm_map_region)
 
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {

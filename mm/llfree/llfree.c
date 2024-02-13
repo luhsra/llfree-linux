@@ -122,6 +122,9 @@ static int __init llfree_init_module(void)
 }
 module_init(llfree_init_module);
 
+#if IS_ENABLED(CONFIG_DEV_DAX)
+struct device *device_dax_driver_find_device_by_devt(dev_t devt);
+
 static __init int find_dax_init(void)
 {
 	dev_t dax_id = MKDEV(252, 0); // /dev/dax0.0
@@ -155,6 +158,7 @@ static __init int find_dax_init(void)
 	return 0;
 }
 late_initcall(find_dax_init);
+#endif
 
 static void llfree_cleanup_module(void)
 {

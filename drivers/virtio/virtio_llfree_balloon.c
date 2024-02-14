@@ -71,7 +71,6 @@ struct virtio_llfree_balloon {
 	LLFreeBalloonRequest guest_req;
 	AutoDeflateInfo *auto_deflate_info;
 	llfree_zone_info_t qemu_info;
-	wait_queue_head_t acked;
 	enum llfree_zone_type map_zone_type[LLFREE_MAX_NR_ZONES];
 };
 
@@ -110,6 +109,7 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 {
 	struct scatterlist sg;
 	struct zone *zone;
+	uint32_t len;
 
 	struct pglist_data *pgdat = first_online_pgdat();
 
@@ -138,6 +138,10 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 		virtqueue_add_outbuf(vb->llfree_info_vq, &sg, 1, vb,
 				     GFP_KERNEL);
 		virtqueue_kick(vb->llfree_info_vq);
+
+		while (!virtqueue_get_buf(vb->llfree_info_vq, &len) &&
+		       !virtqueue_is_broken(vb->llfree_info_vq))
+			cpu_relax();
 	}
 }
 
@@ -156,8 +160,9 @@ static void noinline virtio_llfree_send_request(
 		virtqueue_add_outbuf(vb->llfree_request_vq, &sg, 1, vb,
 				     GFP_KERNEL);
 		virtqueue_kick(vb->llfree_request_vq);
-		wait_event(vb->acked,
-			   virtqueue_get_buf(vb->llfree_request_vq, &len));
+		while (!virtqueue_get_buf(vb->llfree_request_vq, &len) &&
+		       !virtqueue_is_broken(vb->llfree_request_vq))
+			cpu_relax();
 	}
 }
 #endif
@@ -190,6 +195,9 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	numa_node_id = zone->node;
 	core = raw_smp_processor_id();
 
+	// printk("spinlock taken: core %u zone %u threadid %u\n", core, zone_type,
+	//        current->pid);
+
 	if (core > num_cores) {
 		printk("llfree_balloon: core > num_cores!\n");
 		return;
@@ -217,6 +225,8 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	       !virtqueue_is_broken(vb_llfree->llfree_auto_deflate_vqs[core]))
 		cpu_relax();
 	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
+	// printk("spinlock returned: core %u zone %u threadid %u\n", core, zone_type,
+	//        current->pid);
 }
 EXPORT_SYMBOL(virtio_llfree_auto_deflate);
 #endif
@@ -279,17 +289,6 @@ static const struct virtio_device_id id_table[] = {
 	{ 0 },
 };
 
-static void noinline virtio_llfree_callback(struct virtqueue *vq)
-{
-}
-
-static void balloon_ack(struct virtqueue *vq)
-{
-	struct virtio_llfree_balloon *vb = vq->vdev->priv;
-
-	wake_up(&vb->acked);
-}
-
 static int init_vqs(struct virtio_llfree_balloon *vb)
 {
 	struct virtqueue **vqs;
@@ -316,10 +315,9 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 	callbacks = kzalloc(num_vqs * (sizeof(vq_callback_t *)), GFP_KERNEL);
 	names = kzalloc((num_vqs * sizeof(char *)), GFP_KERNEL);
 
-	callbacks[VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ] =
-		virtio_llfree_callback;
+	callbacks[VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ] = NULL;
 	names[VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ] = "llfree info";
-	callbacks[VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ] = balloon_ack;
+	callbacks[VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ] = NULL;
 	names[VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ] = "llfree requests";
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
@@ -378,7 +376,6 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 
 	virtio_llfree_init_map_zone_types(
 		(enum llfree_zone_type *)&vb->map_zone_type);
-	init_waitqueue_head(&vb->acked);
 
 	llfree_create_buffer(&vb->vq_buffer.buf, &vb->vq_buffer.len);
 	if (!vb->vq_buffer.buf) {

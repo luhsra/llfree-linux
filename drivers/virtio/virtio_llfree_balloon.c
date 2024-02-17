@@ -31,6 +31,9 @@ extern uint32_t shrink_pagecache_for_reclaim(uint32_t num_numa_node,
 #define FEATURE_IS_ENABLED(vdev, bit) virtio_has_feature(vdev, bit)
 #define FEATURE_IS_DISABLED(vdev, bit) !virtio_has_feature(vdev, bit)
 
+/*-----------------------------------------------------------------------------------------------
+| Enums
+-------------------------------------------------------------------------------------------------*/
 enum virtio_llfree_balloon_vq {
 	VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ,
 	VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ,
@@ -53,6 +56,9 @@ enum RequestType {
 };
 typedef enum RequestType RequestType;
 
+/*-----------------------------------------------------------------------------------------------
+| Structs
+-------------------------------------------------------------------------------------------------*/
 struct llfree_vq_buffer {
 	void *buf;
 	size_t len;
@@ -82,8 +88,11 @@ struct virtio_llfree_balloon {
 	enum llfree_zone_type map_zone_type[LLFREE_MAX_NR_ZONES];
 };
 
-struct virtio_llfree_balloon *vb_llfree;
+static struct virtio_llfree_balloon *vb_llfree;
 
+/*-----------------------------------------------------------------------------------------------
+| Helper Functions
+-------------------------------------------------------------------------------------------------*/
 static void noinline
 virtio_llfree_init_map_zone_types(enum llfree_zone_type *map_zone_type)
 {
@@ -112,6 +121,9 @@ virtio_llfree_init_map_zone_types(enum llfree_zone_type *map_zone_type)
 #endif
 }
 
+/*-----------------------------------------------------------------------------------------------
+| Virtqueue Sending Functions
+-------------------------------------------------------------------------------------------------*/
 static void noinline
 virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 {
@@ -119,6 +131,7 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 	struct zone *zone;
 	uint32_t len;
 
+	// only UMA is currently supported
 	struct pglist_data *pgdat = first_online_pgdat();
 
 	for (uint32_t i = 0; i < MAX_NR_ZONES; i++) {
@@ -147,6 +160,7 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 				     GFP_KERNEL);
 		virtqueue_kick(vb->llfree_info_vq);
 
+		// sync with virtio-device
 		while (!virtqueue_get_buf(vb->llfree_info_vq, &len) &&
 		       !virtqueue_is_broken(vb->llfree_info_vq))
 			cpu_relax();
@@ -160,18 +174,21 @@ static void noinline virtio_llfree_send_request(
 	struct scatterlist sg;
 	uint32_t len;
 
-	if (FEATURE_IS_ENABLED(
+	if (FEATURE_IS_DISABLED(
 		    vb->vdev,
 		    VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
-		vb->guest_req.req = llfree_request;
-		sg_init_one(&sg, &vb->guest_req, sizeof(LLFreeBalloonRequest));
-		virtqueue_add_outbuf(vb->llfree_request_vq, &sg, 1, vb,
-				     GFP_KERNEL);
-		virtqueue_kick(vb->llfree_request_vq);
-		while (!virtqueue_get_buf(vb->llfree_request_vq, &len) &&
-		       !virtqueue_is_broken(vb->llfree_request_vq))
-			cpu_relax();
+		return;
 	}
+
+	vb->guest_req.req = llfree_request;
+	sg_init_one(&sg, &vb->guest_req, sizeof(LLFreeBalloonRequest));
+	virtqueue_add_outbuf(vb->llfree_request_vq, &sg, 1, vb, GFP_KERNEL);
+	virtqueue_kick(vb->llfree_request_vq);
+
+	// sync with virtio-device
+	while (!virtqueue_get_buf(vb->llfree_request_vq, &len) &&
+	       !virtqueue_is_broken(vb->llfree_request_vq))
+		cpu_relax();
 }
 #endif
 
@@ -184,7 +201,7 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	uint32_t numa_node_id, zone_type;
 	unsigned long flags;
 
-	// only auto deflate if virtio device supports it
+	// only auto deflate if supported
 	if (FEATURE_IS_DISABLED(vb_llfree->vdev,
 				VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		return;
@@ -223,7 +240,7 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	virtqueue_kick(vb_llfree->llfree_auto_deflate_vqs[core]);
 
 	// we can't sleep in this context
-	// busy wait for virtio device
+	// busy wait to sync with virtio-device
 	while (!virtqueue_get_buf(vb_llfree->llfree_auto_deflate_vqs[core],
 				  &len) &&
 	       !virtqueue_is_broken(vb_llfree->llfree_auto_deflate_vqs[core]))
@@ -234,6 +251,9 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 EXPORT_SYMBOL(virtio_llfree_auto_deflate);
 #endif
 
+/*-----------------------------------------------------------------------------------------------
+| Pagecache Shrinking Functions
+-------------------------------------------------------------------------------------------------*/
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
 static void shrink_pagecache_func(struct work_struct *work)
 {
@@ -258,39 +278,38 @@ static void shrink_pagecache_func(struct work_struct *work)
 			 shrink_pagecache_num_pages,
 			 &shrink_pagecache_num_pages);
 
+	// tell virtio-device to retry inflation now that we have shrunk
+	// the pagecache
 	virtio_llfree_send_request(vb, SCHEDULE_LLFREE_BALLOON_UPDATE);
 }
 #endif
 
+/*-----------------------------------------------------------------------------------------------
+| General Virtio Functions
+-------------------------------------------------------------------------------------------------*/
 static void virtio_llfree_config_changed(struct virtio_device *vdev)
 {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
 	struct virtio_llfree_balloon *vb;
 	uint32_t shrink_pagecache_num_pages;
 
+	if (FEATURE_IS_DISABLED(
+		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
+		return;
+	}
+
 	vb = (struct virtio_llfree_balloon *)vdev->priv;
 
 	// dispatch
-	if (FEATURE_IS_ENABLED(
-		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
-		virtio_cread_le(vdev, struct virtio_llfree_balloon_config,
-				shrink_pagecache_num_pages,
-				&shrink_pagecache_num_pages);
+	virtio_cread_le(vdev, struct virtio_llfree_balloon_config,
+			shrink_pagecache_num_pages,
+			&shrink_pagecache_num_pages);
 
-		if (shrink_pagecache_num_pages > 0) {
-			queue_work(system_freezable_wq,
-				   &vb->shrink_pagecache_work);
-		}
+	if (shrink_pagecache_num_pages > 0) {
+		queue_work(system_freezable_wq, &vb->shrink_pagecache_work);
 	}
 #endif
 }
-
-// IDs can't be arbitrarily chosen as it seems, for now
-// say that we are virtio-balloon
-static const struct virtio_device_id id_table[] = {
-	{ VIRTIO_ID_BALLOON, VIRTIO_DEV_ANY_ID },
-	{ 0 },
-};
 
 static int init_vqs(struct virtio_llfree_balloon *vb)
 {
@@ -407,9 +426,12 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 	if (err)
 		goto out_free_vb;
 
+	// enable global auto-deflate function call...
 	vb_llfree = vb;
 
 	virtio_device_ready(vdev);
+
+	// directly send our zone info to our virtio-device
 	virtio_llfree_send_llfree_info(vb);
 	return 0;
 
@@ -447,6 +469,14 @@ static unsigned int features[] = {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE,
 #endif
+};
+
+// TODO: try again with own id
+// IDs can't be arbitrarily chosen as it seems, for now
+// say that we are virtio-balloon
+static const struct virtio_device_id id_table[] = {
+	{ VIRTIO_ID_BALLOON, VIRTIO_DEV_ANY_ID },
+	{ 0 },
 };
 
 static struct virtio_driver virtio_llfree_balloon_driver = {

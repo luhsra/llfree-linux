@@ -17,11 +17,19 @@
 #include <linux/wait.h>
 #include <linux/mm.h>
 #include <linux/page_reporting.h>
-
 #include "llfree_qemu.h"
 
 extern uint32_t shrink_pagecache_for_reclaim(uint32_t num_numa_node,
 					     uint32_t nr_to_reclaim);
+/*-----------------------------------------------------------------------------------------------
+| Defines
+-------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------
+| Macros
+-------------------------------------------------------------------------------------------------*/
+#define FEATURE_IS_ENABLED(vdev, bit) virtio_has_feature(vdev, bit)
+#define FEATURE_IS_DISABLED(vdev, bit) !virtio_has_feature(vdev, bit)
 
 enum virtio_llfree_balloon_vq {
 	VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ,
@@ -152,7 +160,7 @@ static void noinline virtio_llfree_send_request(
 	struct scatterlist sg;
 	uint32_t len;
 
-	if (virtio_has_feature(
+	if (FEATURE_IS_ENABLED(
 		    vb->vdev,
 		    VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
 		vb->guest_req.req = llfree_request;
@@ -177,7 +185,7 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	unsigned long flags;
 
 	// only auto deflate if virtio device supports it
-	if (!virtio_has_feature(vb_llfree->vdev,
+	if (FEATURE_IS_DISABLED(vb_llfree->vdev,
 				VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		return;
 	}
@@ -263,7 +271,7 @@ static void virtio_llfree_config_changed(struct virtio_device *vdev)
 	vb = (struct virtio_llfree_balloon *)vdev->priv;
 
 	// dispatch
-	if (virtio_has_feature(
+	if (FEATURE_IS_ENABLED(
 		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
 		virtio_cread_le(vdev, struct virtio_llfree_balloon_config,
 				shrink_pagecache_num_pages,
@@ -299,7 +307,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 	num_vqs = VIRTIO_LLFREE_BALLOON_VQ_MAX;
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vb->vdev,
+	if (FEATURE_IS_ENABLED(vb->vdev,
 			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		num_cpus = num_online_cpus();
 		num_vqs = VIRTIO_LLFREE_BALLOON_VQ_MAX + num_cpus;
@@ -316,7 +324,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 	names[VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ] = "llfree requests";
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vb->vdev,
+	if (FEATURE_IS_ENABLED(vb->vdev,
 			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		for (uint32_t i = 0; i < num_cpus; i++) {
 			callbacks[VIRTIO_LLFREE_BALLOON_VQ_MAX + i] = NULL;
@@ -334,7 +342,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 	vb->llfree_request_vq = vqs[VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ];
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vb->vdev,
+	if (FEATURE_IS_ENABLED(vb->vdev,
 			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		for (uint32_t i = 0; i < num_cpus; i++) {
 			vb->llfree_auto_deflate_vqs[i] =
@@ -363,7 +371,7 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 	}
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
-	if (virtio_has_feature(
+	if (FEATURE_IS_ENABLED(
 		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE)) {
 		INIT_WORK(&vb->shrink_pagecache_work, shrink_pagecache_func);
 	}
@@ -381,7 +389,7 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 	vb->vdev = vdev;
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
+	if (FEATURE_IS_ENABLED(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		uint32_t num_cores;
 		num_cores = num_online_cpus();
 		vb->auto_deflate_info = kzalloc(
@@ -422,7 +430,7 @@ static void virtio_llfree_remove(struct virtio_device *vdev)
 {
 	struct virtio_llfree_balloon *vb = vdev->priv;
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
+	if (FEATURE_IS_ENABLED(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		kfree(vb->llfree_auto_deflate_vqs);
 	}
 #endif

@@ -2044,6 +2044,82 @@ static int kvm_vm_ioctl_set_memory_region(struct kvm *kvm,
 	return kvm_set_memory_region(kvm, mem);
 }
 
+static int kvm_vcpu_ioctl_map_memory_region(struct kvm_vcpu *vcpu,
+					  struct kvm_map_region *map_region)
+{
+
+	struct page *page;
+	u64 error_code;
+	int idx, ret = 0;
+	bool added = false;
+
+	if (!atomic_read(&vcpu->kvm->online_vcpus))
+		return -EINVAL;
+
+	/* Sanity check */
+	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
+	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) ||
+	    !map_region->nr_pages ||
+	    map_region->nr_pages & GENMASK_ULL(63, 63 - PAGE_SHIFT) ||
+	    map_region->gpa + (map_region->nr_pages << PAGE_SHIFT) <= map_region->gpa) {
+		return -EINVAL;
+  }
+
+  // if (mutex_lock_killable(&vcpu->mutex))
+  //   return -EINTR;
+
+  idx = srcu_read_lock(&vcpu->kvm->srcu);
+
+	// kvm_mmu_reload(vcpu);
+
+  printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
+
+	while (map_region->nr_pages) {
+		if (signal_pending(current)) {
+			ret = -ERESTARTSYS;
+			break;
+		}
+
+		if (need_resched())
+			cond_resched();
+
+		/* Pin the source page. */
+		ret = get_user_pages_fast(map_region->source_addr, 1, 0, &page);
+		if (ret < 0)
+			break;
+		if (ret != 1) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		/* TODO: large page support. */
+    error_code = PFERR_WRITE_MASK;
+		ret = kvm_mmu_map_page(vcpu, map_region->gpa, error_code,
+					   PG_LEVEL_4K);
+
+		put_page(page);
+		if (ret)
+			break;
+
+		map_region->source_addr += PAGE_SIZE;
+		map_region->gpa += PAGE_SIZE;
+	  map_region->nr_pages--;
+		added = true;
+	}
+
+	srcu_read_unlock(&vcpu->kvm->srcu, idx);
+	// vcpu_put(vcpu);
+
+	mutex_unlock(&vcpu->mutex);
+
+	if (added && map_region->nr_pages > 0)
+		ret = -EAGAIN;
+
+	// if (copy_to_user((void __user *)cmd->data, &region, sizeof(region)))
+	// 	ret = -EFAULT;
+
+	return ret;
+}
 static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
@@ -2067,13 +2143,15 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
   }
 
   vcpu = kvm_get_vcpu(kvm, 0);
-  if (mutex_lock_killable(&vcpu->mutex))
-    return -EINTR;
+  // if (mutex_lock_killable(&vcpu->mutex))
+  //   return -EINTR;
 
   vcpu_load(vcpu);
   idx = srcu_read_lock(&kvm->srcu);
 
 	kvm_mmu_reload(vcpu);
+
+  printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
 
 	while (map_region->nr_pages) {
 		if (signal_pending(current)) {
@@ -2094,11 +2172,10 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		}
 
 		/* TODO: large page support. */
-    error_code = 0;
+    error_code = PFERR_WRITE_MASK;
 		ret = kvm_mmu_map_page(vcpu, map_region->gpa, error_code,
 					   PG_LEVEL_4K);
 
-    ret = kvm_mmu_do_page_fault(vcpu, map_region->gpa, 0, false);
 		put_page(page);
 		if (ret)
 			break;
@@ -4187,6 +4264,17 @@ out_free1:
 		kfree(kvm_regs);
 		break;
 	}
+  case KVM_VCPU_MAP_GFN_RANGE: {
+    struct kvm_map_region map_region;
+
+		r = -EFAULT;
+		if (copy_from_user(&map_region, argp,
+						sizeof(map_region)))
+			goto out;
+   
+    r = kvm_vcpu_ioctl_map_memory_region(vcpu, &map_region);
+    break;
+  }
 	case KVM_SET_REGS: {
 		struct kvm_regs *kvm_regs;
 

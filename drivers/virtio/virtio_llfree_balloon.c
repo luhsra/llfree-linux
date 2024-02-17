@@ -178,7 +178,7 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 
 	// only auto deflate if virtio device supports it
 	if (!virtio_has_feature(vb_llfree->vdev,
-				VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+				VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		return;
 	}
 
@@ -190,21 +190,19 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	}
 
 	spin_lock_irqsave(&zone->auto_deflate_lock, flags);
-	// are core ids alway(or at least normally) continuous?
+
+	// are core ids always continuous?
 	num_cores = num_online_cpus();
 	numa_node_id = zone->node;
 	core = raw_smp_processor_id();
-
-	// printk("spinlock taken: core %u zone %u threadid %u\n", core, zone_type,
-	//        current->pid);
 
 	if (core > num_cores) {
 		printk("llfree_balloon: core > num_cores!\n");
 		return;
 	}
 
-	printk("auto-deflate: core %u zone %u threadid %u\n", core, zone_type,
-	       current->pid);
+	// printk("auto-deflate: core %u zone %u threadid %u\n", core, zone_type,
+	//        current->pid);
 	vb_llfree->auto_deflate_info[core].numa_node_id = numa_node_id;
 	vb_llfree->auto_deflate_info[core].zone_type =
 		vb_llfree->map_zone_type[zone_type];
@@ -218,15 +216,12 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 
 	// we can't sleep in this context
 	// busy wait for virtio device
-	// technically only needed when using ioventfd as transport,
-	// but we always need to get the buffer
 	while (!virtqueue_get_buf(vb_llfree->llfree_auto_deflate_vqs[core],
 				  &len) &&
 	       !virtqueue_is_broken(vb_llfree->llfree_auto_deflate_vqs[core]))
 		cpu_relax();
+
 	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
-	// printk("spinlock returned: core %u zone %u threadid %u\n", core, zone_type,
-	//        current->pid);
 }
 EXPORT_SYMBOL(virtio_llfree_auto_deflate);
 #endif
@@ -282,7 +277,7 @@ static void virtio_llfree_config_changed(struct virtio_device *vdev)
 #endif
 }
 
-// IDs can't be arbitrarily chosen, for now
+// IDs can't be arbitrarily chosen as it seems, for now
 // say that we are virtio-balloon
 static const struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_BALLOON, VIRTIO_DEV_ANY_ID },
@@ -305,7 +300,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	if (virtio_has_feature(vb->vdev,
-			       VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		num_cpus = num_online_cpus();
 		num_vqs = VIRTIO_LLFREE_BALLOON_VQ_MAX + num_cpus;
 	}
@@ -322,7 +317,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	if (virtio_has_feature(vb->vdev,
-			       VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		for (uint32_t i = 0; i < num_cpus; i++) {
 			callbacks[VIRTIO_LLFREE_BALLOON_VQ_MAX + i] = NULL;
 			names[VIRTIO_LLFREE_BALLOON_VQ_MAX + i] =
@@ -340,7 +335,7 @@ static int init_vqs(struct virtio_llfree_balloon *vb)
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	if (virtio_has_feature(vb->vdev,
-			       VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+			       VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		for (uint32_t i = 0; i < num_cpus; i++) {
 			vb->llfree_auto_deflate_vqs[i] =
 				vqs[VIRTIO_LLFREE_BALLOON_VQ_MAX + i];
@@ -386,7 +381,7 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 	vb->vdev = vdev;
 
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		uint32_t num_cores;
 		num_cores = num_online_cpus();
 		vb->auto_deflate_info = kzalloc(
@@ -427,7 +422,7 @@ static void virtio_llfree_remove(struct virtio_device *vdev)
 {
 	struct virtio_llfree_balloon *vb = vdev->priv;
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE)) {
+	if (virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE)) {
 		kfree(vb->llfree_auto_deflate_vqs);
 	}
 #endif
@@ -438,8 +433,12 @@ static void virtio_llfree_remove(struct virtio_device *vdev)
 }
 
 static unsigned int features[] = {
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
 	VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE,
-	VIRTIO_LLFREE_BALLOON_F_AUTO_DEFLATE,
+#endif
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
+	VIRTIO_LLFREE_BALLOON_F_GUEST_DEFLATE,
+#endif
 };
 
 static struct virtio_driver virtio_llfree_balloon_driver = {

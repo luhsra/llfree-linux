@@ -9,6 +9,7 @@
 // Experiment: Allocation or Consumation
 #define ALLOC 0
 #define CONSUME 1
+#define ALLOC_MULTITHREAD 2
 const char *experiment_names[] = { "ALLOC", "CONSUME" };
 
 // Guest Frame Size: base (4KiB) or huge (2MiB)
@@ -21,16 +22,22 @@ const char *gfs_names[] = { "BASE_FRAME", "HUGE_FRAME" };
 #define NO_THP 1
 const char *host_backing_names[] = { "THP", "NO_THP" };
 
+// Host Backing: THP enabled or disabled
+#define IODEVICE 0
+#define VCPU_SYNC 1
+const char *transport_mechanism_names[] = { "iodevice", "vcpu-sync" };
+
 int main(int argc, char **argv)
 {
 	int file_desc;
-	int num_experiment, num_gfs, num_host_backing, num_gib;
+	int num_experiment, num_gfs, num_host_backing, num_gib,
+		num_transport_mechanism;
 	char *logfile_path, *candidate_name;
 	FILE *logfile;
 	long ret;
 
-	if (argc != 7) {
-		printf("expected six arguments, got %i\n", argc - 1);
+	if (argc != 8) {
+		printf("expected seven arguments, got %i\n", argc - 1);
 		exit(EXIT_FAILURE);
 	}
 
@@ -39,14 +46,15 @@ int main(int argc, char **argv)
 	num_experiment = atoi(argv[3]);
 	num_gfs = atoi(argv[4]);
 	num_host_backing = atoi(argv[5]);
-	num_gib = atoi(argv[6]);
+	num_transport_mechanism = atoi(argv[6]);
+	num_gib = atoi(argv[7]);
 
 	if (!candidate_name) {
 		printf("invalid candidate name\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if (num_experiment < 0 || num_experiment > 1) {
+	if (num_experiment < 0 || num_experiment > 2) {
 		printf("invalid argument range num_experiment\n");
 		exit(EXIT_FAILURE);
 	}
@@ -58,6 +66,11 @@ int main(int argc, char **argv)
 
 	if (num_host_backing < 0 || num_host_backing > 1) {
 		printf("invalid argument range num_host_backing\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (num_transport_mechanism < 0 || num_transport_mechanism > 1) {
+		printf("invalid argument range num_transport_mechanism\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -85,13 +98,17 @@ int main(int argc, char **argv)
 		ret = ioctl(file_desc, IOCTL_CONSUME_BASE_PAGE_TEST, num_gib);
 	} else if (num_experiment == CONSUME && num_gfs == HUGE_FRAME) {
 		ret = ioctl(file_desc, IOCTL_CONSUME_HUGE_PAGE_TEST, num_gib);
+	} else if (num_experiment == ALLOC_MULTITHREAD) {
+		ret = ioctl(file_desc, IOCTL_ALLOC_TEST_MULTITHREADED, num_gib);
 	}
 
 	// logging
 	printf("Test returned %li\n", ret);
-	fprintf(logfile, "%s;%s;%s;%s;%i;%li\n", candidate_name,
+	fprintf(logfile, "%s;%s;%s;%s;%s;%i;%li\n", candidate_name,
 		experiment_names[num_experiment], gfs_names[num_gfs],
-		host_backing_names[num_host_backing], num_gib, ret);
+		host_backing_names[num_host_backing],
+		transport_mechanism_names[num_transport_mechanism], num_gib,
+		ret);
 
 	close(file_desc);
 	return ret;

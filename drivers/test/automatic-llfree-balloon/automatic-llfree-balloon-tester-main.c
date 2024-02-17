@@ -69,16 +69,19 @@ device_ioctl(struct file *file, /* ditto */
 	/* Switch according to the ioctl called */
 	switch (ioctl_num) {
 	case IOCTL_ALLOC_BASE_PAGE_TEST:
-		ret = alloc_test_base_page(ioctl_param);
+		ret = alloc_test_base_page(ioctl_param, ZONE_NORMAL_FLAGS);
 		break;
 	case IOCTL_ALLOC_HUGE_PAGE_TEST:
-		ret = alloc_test_huge_page(ioctl_param);
+		ret = alloc_test_huge_page(ioctl_param, ZONE_NORMAL_FLAGS);
 		break;
 	case IOCTL_CONSUME_BASE_PAGE_TEST:
-		ret = consume_test_base_page(ioctl_param);
+		ret = consume_test_base_page(ioctl_param, ZONE_NORMAL_FLAGS);
 		break;
 	case IOCTL_CONSUME_HUGE_PAGE_TEST:
-		ret = consume_test_huge_page(ioctl_param);
+		ret = consume_test_huge_page(ioctl_param, ZONE_NORMAL_FLAGS);
+		break;
+	case IOCTL_ALLOC_TEST_MULTITHREADED:
+		ret = alloc_test_multithreaded(1);
 		break;
 	}
 

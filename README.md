@@ -1,9 +1,12 @@
-# Linux with LLFree
+# Linux with LLFree and LLFree-Balloon
 
 In addition to the general dependencies rust `nightly` version `1.64.0` (or newer) is needed.
 > Rustup is recommended: [install rust](https://www.rust-lang.org/learn/get-started)
 
-First enable the `CONFIG_LLFREE` and `CONFIG_LLFREE_FAST_FREE` options (`make LLVM=1 menuconfig`). It is currently limited to x86_64.
+First enable the `CONFIG_LLFREE` and `CONFIG_LLFREE_FAST_FREE` options (`make LLVM=1 menuconfig`) for LLFree. It is currently limited to x86_64.
+To enable LLFree-Balloon, set `CONFIG_VIRTIO_LLFREE_BALLOON`. LLFree-Balloon optionally supports guest triggered auto-deflate via 
+`CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE`. Also, optionally the LLFree-Balloon may be allowed to shrink the Page Cache by setting 
+`CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE`.
 Then the Kernel can be build as usual (with llvm):
 
 ```sh

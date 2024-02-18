@@ -43,3 +43,7 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 ```
 
 > Logging is automatically initialized with the allocator.
+
+## Testing Module
+An additional kernel module is available in drivers/test/automatic-llfree-balloon. It can be used to
+measure and test (multi-threaded) guest triggered auto-deflate.

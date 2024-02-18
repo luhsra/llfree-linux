@@ -223,11 +223,11 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 
 	if (core > num_cores) {
 		printk("llfree_balloon: core > num_cores!\n");
-		return;
+		goto out;
 	}
 
-	// printk("auto-deflate: core %u zone %u threadid %u\n", core, zone_type,
-	//        current->pid);
+	printk("auto-deflate: core %u zone %u threadid %u\n", core, zone_type,
+	       current->pid);
 	vb_llfree->auto_deflate_info[core].numa_node_id = numa_node_id;
 	vb_llfree->auto_deflate_info[core].zone_type =
 		vb_llfree->map_zone_type[zone_type];
@@ -246,6 +246,7 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone)
 	       !virtqueue_is_broken(vb_llfree->llfree_auto_deflate_vqs[core]))
 		cpu_relax();
 
+out:
 	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
 }
 EXPORT_SYMBOL(virtio_llfree_auto_deflate);

@@ -2120,15 +2120,78 @@ static int kvm_vcpu_ioctl_map_memory_region(struct kvm_vcpu *vcpu,
 
 	return ret;
 }
+
+// static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
+// 					  struct kvm_map_region *map_region)
+// {
+//
+// 	struct kvm_vcpu *vcpu;
+// 	struct page *page;
+// 	u64 error_code;
+// 	int idx, ret = 0;
+// 	bool added = false;
+//
+// 	if (!atomic_read(&kvm->online_vcpus))
+// 		return -EINVAL;
+//
+// 	/* Sanity check */
+// 	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
+// 	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) ||
+// 	    !map_region->nr_pages ||
+// 	    map_region->nr_pages & GENMASK_ULL(63, 63 - PAGE_SHIFT) ||
+// 	    map_region->gpa + (map_region->nr_pages << PAGE_SHIFT) <= map_region->gpa) {
+// 		return -EINVAL;
+//   }
+//
+//   vcpu = kvm_get_vcpu(kvm, 0);
+//   // if (mutex_lock_killable(&vcpu->mutex))
+//   //   return -EINTR;
+//
+//   vcpu_load(vcpu);
+//   idx = srcu_read_lock(&kvm->srcu);
+//
+// 	kvm_mmu_reload(vcpu);
+//
+//   printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
+//
+// 	while (map_region->nr_pages) {
+// 		if (signal_pending(current)) {
+// 			ret = -ERESTARTSYS;
+// 			break;
+// 		}
+//
+// 		if (need_resched())
+// 			cond_resched();
+//
+// 		/* Pin the source page. */
+// 		ret = get_user_pages_fast(map_region->source_addr, 1, 0, &page);
+// 		if (ret < 0)
+// 			break;
+// 		if (ret != 1) {
+// 			ret = -ENOMEM;
+// 			break;
+// 		}
+//
+// 		/* TODO: large page support. */
+//     error_code = PFERR_WRITE_MASK;
+// 		ret = kvm_mmu_map_page(vcpu, map_region->gpa, error_code,
+// 					   PG_LEVEL_4K);
+//
+// 		put_page(page);
+// 		if (ret)
+// 			break;
+//
+// 		map_region->source_addr += PAGE_SIZE;
+// 		map_region->gpa += PAGE_SIZE;
+// 	  map_region->nr_pages--;
+// 		added = true;
+// }
+
 static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
 
-	struct kvm_vcpu *vcpu;
-	struct page *page;
-	u64 error_code;
-	int idx, ret = 0;
-	bool added = false;
+	int ret = 0;
 
 	if (!atomic_read(&kvm->online_vcpus))
 		return -EINVAL;
@@ -2142,63 +2205,31 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		return -EINVAL;
   }
 
-  vcpu = kvm_get_vcpu(kvm, 0);
-  // if (mutex_lock_killable(&vcpu->mutex))
-  //   return -EINTR;
-
-  vcpu_load(vcpu);
-  idx = srcu_read_lock(&kvm->srcu);
-
-	kvm_mmu_reload(vcpu);
-
-  printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
-
 	while (map_region->nr_pages) {
-		if (signal_pending(current)) {
-			ret = -ERESTARTSYS;
-			break;
-		}
 
-		if (need_resched())
-			cond_resched();
+    const struct kvm_hva_range range = {
+      .start		= map_region->source_addr,
+      .end		= map_region->source_addr + PAGE_SIZE,
+      .pte		= {virt_to_phys((void *)map_region->source_addr)},
+      .handler	= kvm_set_spte_gfn,
+      .on_lock	= (void *)kvm_null_fn,
+      .on_unlock	= (void *)kvm_null_fn,
+      .flush_on_ret	= true,
+      .may_block	= false,
+    };
 
-		/* Pin the source page. */
-		ret = get_user_pages_fast(map_region->source_addr, 1, 0, &page);
-		if (ret < 0)
-			break;
-		if (ret != 1) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		/* TODO: large page support. */
-    error_code = PFERR_WRITE_MASK;
-		ret = kvm_mmu_map_page(vcpu, map_region->gpa, error_code,
-					   PG_LEVEL_4K);
-
-		put_page(page);
-		if (ret)
-			break;
+    printk(KERN_WARNING "phys addr: %lx\n", virt_to_phys((void *)map_region->source_addr)); 
+    printk(KERN_WARNING "map pte: %lx\n", range.pte); 
+    __kvm_handle_hva_range(kvm, &range);
 
 		map_region->source_addr += PAGE_SIZE;
 		map_region->gpa += PAGE_SIZE;
 	  map_region->nr_pages--;
-		added = true;
-	}
+  }
 
-	srcu_read_unlock(&kvm->srcu, idx);
-	vcpu_put(vcpu);
-
-	mutex_unlock(&vcpu->mutex);
-
-	if (added && map_region->nr_pages > 0)
-		ret = -EAGAIN;
-
-	// if (copy_to_user((void __user *)cmd->data, &region, sizeof(region)))
-	// 	ret = -EFAULT;
-
-	return ret;
+  return ret;
 }
+
 
 #ifndef CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
 /**

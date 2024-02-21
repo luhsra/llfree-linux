@@ -2,6 +2,7 @@
 #ifndef _ASM_X86_PGTABLE_H
 #define _ASM_X86_PGTABLE_H
 
+#include "linux/kern_levels.h"
 #include <linux/mem_encrypt.h>
 #include <asm/page.h>
 #include <asm/pgtable_types.h>
@@ -188,6 +189,16 @@ static inline unsigned long pte_pfn(pte_t pte)
 {
 	phys_addr_t pfn = pte_val(pte);
 	pfn ^= protnone_mask(pfn);
+	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
+}
+
+static inline unsigned long pte_pfn_debug(pte_t pte)
+{
+	phys_addr_t pfn = pte_val(pte);
+  printk(KERN_WARNING "pte_pfn: pfn %llx", pfn);
+	/* pfn ^= protnone_mask(pfn); */
+  printk(KERN_WARNING "pte_pfn: pfn mask %llx", pfn);
+  printk(KERN_WARNING "pte_pfn: pfn return %llx", (pfn & PTE_PFN_MASK) >> PAGE_SHIFT);
 	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
 }
 

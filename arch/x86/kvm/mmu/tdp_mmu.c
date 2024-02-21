@@ -1316,11 +1316,11 @@ static bool set_spte_gfn(struct kvm *kvm, struct tdp_iter *iter,
 	u64 new_spte;
 
 	/* Huge pages aren't expected to be modified without first being zapped. */
-	WARN_ON(pte_huge(range->pte) || range->start + 1 != range->end);
+	// WARN_ON(pte_huge(range->pte) || range->start + 1 != range->end);
 
-	if (iter->level != PG_LEVEL_4K ||
-	    !is_shadow_present_pte(iter->old_spte))
-		return false;
+	// if (iter->level != PG_LEVEL_4K ||
+	//     !is_shadow_present_pte(iter->old_spte))
+	// 	return false;
 
 	/*
 	 * Note, when changing a read-only SPTE, it's not strictly necessary to
@@ -1332,7 +1332,7 @@ static bool set_spte_gfn(struct kvm *kvm, struct tdp_iter *iter,
 
 	if (!pte_write(range->pte)) {
 		new_spte = kvm_mmu_changed_pte_notifier_make_spte(iter->old_spte,
-								  pte_pfn(range->pte));
+								  pte_pfn_debug(range->pte));
 
 		tdp_mmu_set_spte(kvm, iter, new_spte);
 	}

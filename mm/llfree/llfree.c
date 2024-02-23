@@ -19,6 +19,11 @@ MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
+void noinline llfree_panic(void)
+{
+	llfree_warn("panic");
+}
+
 llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
@@ -76,8 +81,6 @@ static int llfree_show(struct seq_file *m, void *arg)
 	struct zone *node_zones = pgdat->node_zones;
 
 	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
-		// char *buf;
-		// size_t len;
 		llfree_t *llfree = zone->llfree;
 
 		if (!populated_zone(zone))
@@ -89,20 +92,31 @@ static int llfree_show(struct seq_file *m, void *arg)
 			   "/%" PRIuS " }\n",
 			   llfree_free_frames(llfree), llfree->lower.frames,
 			   lower_free_huge(&llfree->lower),
-			   llfree->lower.childs_len);
+			   llfree->lower.children_len);
 		preempt_enable();
+	}
+	return 0;
+}
 
-		// len = seq_get_buf(m, &buf);
-		// if (len > 0) {
-		// 	preempt_disable();
-		// 	// len = min(len,
-		// 	// 	  (size_t)llfree_dump(zone->llfree, buf, len));
-		// 	preempt_enable();
-		// 	seq_commit(m, len);
-		// } else {
-		// 	seq_commit(m, -1);
-		// 	pr_err("buf empty\n");
-		// }
+static int llfree_frag_show(struct seq_file *m, void *arg)
+{
+	pg_data_t *pgdat = (pg_data_t *)arg;
+	struct zone *zone;
+	struct zone *node_zones = pgdat->node_zones;
+
+	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
+		if (!populated_zone(zone))
+			continue;
+
+		for (size_t i = 0; i < llfree_frames(zone->llfree);
+		     i += 1 << LLFREE_HUGE_ORDER) {
+			size_t free = llfree_free_at(zone->llfree, i,
+						     LLFREE_HUGE_ORDER);
+			// [0, 9], where 0 is entirely allocated and 9 is free
+			size_t level = free == 0 ? 0 : (free / 64 + 1);
+			seq_printf(m, "%d", level);
+		}
+		seq_printf(m, "\n");
 	}
 	return 0;
 }
@@ -114,10 +128,18 @@ static const struct seq_operations llfree_op = {
 	.show = llfree_show,
 };
 
+static const struct seq_operations llfree_frag_op = {
+	.start = frag_start,
+	.next = frag_next,
+	.stop = frag_stop,
+	.show = llfree_frag_show,
+};
+
 static int __init llfree_init_module(void)
 {
 	pr_info("Setup llfree debugging");
 	proc_create_seq("llfree", 0444, NULL, &llfree_op);
+	proc_create_seq("llfree_frag", 0444, NULL, &llfree_frag_op);
 	return 0;
 }
 module_init(llfree_init_module);
@@ -170,4 +192,3 @@ EXPORT_SYMBOL(llfree_free_frames);
 EXPORT_SYMBOL(llfree_free_huge);
 // EXPORT_SYMBOL(llfree_dump);
 // EXPORT_SYMBOL(llfree_print);
-EXPORT_SYMBOL(llfree_for_each_huge);

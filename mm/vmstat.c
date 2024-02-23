@@ -29,6 +29,8 @@
 #include <linux/page_ext.h>
 #include <linux/page_owner.h>
 
+#include <llfree_alloc.h>
+
 #include "internal.h"
 
 #ifdef CONFIG_NUMA
@@ -1489,12 +1491,28 @@ static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 	int order;
 
 	seq_printf(m, "Node %d, zone %8s ", pgdat->node_id, zone->name);
+#ifdef CONFIG_LLFREE
+	{
+		size_t free_huge = llfree_free_huge(zone->llfree);
+		size_t free_small = llfree_free_frames(zone->llfree) - (free_huge << HUGETLB_PAGE_ORDER);
+
+		for (order = 0; order < MAX_ORDER; ++order) {
+			if (order == 0)
+				seq_printf(m, "%6lu ", free_small);
+			else if (order == HUGETLB_PAGE_ORDER)
+				seq_printf(m, "%6lu ", free_huge);
+			else
+				seq_printf(m, "     0 ");
+		}
+	}
+#else
 	for (order = 0; order < MAX_ORDER; ++order)
 		/*
 		 * Access to nr_free is lockless as nr_free is used only for
 		 * printing purposes. Use data_race to avoid KCSAN warning.
 		 */
 		seq_printf(m, "%6lu ", data_race(zone->free_area[order].nr_free));
+#endif
 	seq_putc(m, '\n');
 }
 

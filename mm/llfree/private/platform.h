@@ -58,7 +58,15 @@
 #define llfree_debug(str, ...)
 #endif
 
-#define assert(cond) BUG_ON(!(cond))
+void noinline llfree_panic(void);
+
+#define assert(cond)                     \
+	do {                             \
+		if (unlikely(!(cond))) { \
+			llfree_panic();  \
+			BUG();           \
+		}                        \
+	} while (0)
 
 static const int ATOM_LOAD_ORDER = __ATOMIC_ACQUIRE;
 static const int ATOM_UPDATE_ORDER = __ATOMIC_ACQ_REL;

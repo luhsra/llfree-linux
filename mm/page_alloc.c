@@ -4546,7 +4546,6 @@ retry:
 		}
 
 try_this_zone:
-		// TODO: Infinite loop on failed allocation!
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {

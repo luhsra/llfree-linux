@@ -13,6 +13,7 @@
  *   Yaniv Kamay  <yaniv@qumranet.com>
  */
 
+#include "asm-generic/errno-base.h"
 #include "linux/kern_levels.h"
 #include "mmu/mmu_internal.h"
 #include <kvm/iodev.h>
@@ -2155,9 +2156,11 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
 	struct kvm_vcpu *vcpu;
-	struct page *page;
+	struct page **pages;
 	u64 error_code;
-	int idx, ret = 0;
+	u64 nr_pages_iter;
+	u64 gpa_iter;
+	int idx, ret, pinned_pages = 0;
 
 	if (!atomic_read(&kvm->online_vcpus))
 		return -EINVAL;
@@ -2171,13 +2174,35 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		return -EINVAL;
 	}
 
+	pages = (struct page **)kzalloc(
+		map_region->nr_pages * sizeof(struct page *), GFP_KERNEL);
 	vcpu = kvm_get_vcpu(kvm, 0);
 	idx = srcu_read_lock(&kvm->srcu);
 	kvm_mmu_reload(vcpu);
 
 	printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
 
-	while (map_region->nr_pages) {
+	// Pin the source pages
+	// is there something like a pin limit that might be annoying for our bulk get_user_pages_fast? ...
+	pinned_pages = get_user_pages_fast(map_region->source_addr,
+					   map_region->nr_pages, 0, pages);
+
+	if (pinned_pages < 0) {
+		printk(KERN_WARNING
+		       "kvm_vm_ioctl_map_memory_region: pinning failed completely");
+		goto out;
+	}
+
+	if (pinned_pages != map_region->nr_pages) {
+		printk(KERN_WARNING
+		       "kvm_vm_ioctl_map_memory_region: could only pin %d out of %lu\n",
+		       pinned_pages, map_region->nr_pages);
+		goto out;
+	}
+
+	nr_pages_iter = map_region->nr_pages;
+	gpa_iter = map_region->gpa;
+	while (nr_pages_iter) {
 		if (signal_pending(current)) {
 			ret = -ERESTARTSYS;
 			break;
@@ -2186,35 +2211,37 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		if (need_resched())
 			cond_resched();
 
-		/* Pin the source page. */
-		ret = get_user_pages_fast(map_region->source_addr, 1, 0, &page);
-
-		if (ret < 0) {
-			printk(KERN_WARNING
-			       "kvm map ioctl: could NOT pin page");
-			break;
-		}
-
-		if (ret != 1) {
-			ret = -ENOMEM;
-			break;
-		}
-
 		/* TODO: large page support. */
 		error_code = PFERR_WRITE_MASK;
-		ret = kvm_mmu_map_page(vcpu, map_region->gpa, error_code,
-				       PG_LEVEL_4K);
+		ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code, PG_LEVEL_4K);
 
-		put_page(page);
-		if (ret)
+		for (uint32_t i = 0; i < 2; i++) {
+			ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code,
+					       PG_LEVEL_4K);
+			if (ret != -EAGAIN) {
+				break;
+			}
+		}
+
+		if (ret) {
+			printk("kvm_vm_ioctl_map_memory_region: early break, return value %d\n",
+			       ret);
 			break;
+		}
 
-		map_region->source_addr += PAGE_SIZE;
-		map_region->gpa += PAGE_SIZE;
-		map_region->nr_pages--;
+		gpa_iter += PAGE_SIZE;
+		nr_pages_iter--;
 	}
 
+	for (uint32_t i = 0; i < map_region->nr_pages; i++) {
+		if (pages[i] != NULL) {
+			put_page(pages[i]);
+		}
+	}
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
+
+out:
+	kfree(pages);
 	return 0;
 }
 

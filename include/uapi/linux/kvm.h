@@ -1676,7 +1676,6 @@ struct kvm_enc_region {
 /* Available with  KVM_CAP_S390_VCPU_RESETS */
 #define KVM_S390_NORMAL_RESET	_IO(KVMIO,   0xc3)
 #define KVM_S390_CLEAR_RESET	_IO(KVMIO,   0xc4)
-#define KVM_VCPU_MAP_GFN_RANGE	_IOW(KVMIO,   0xc4, struct kvm_map_region)
 
 struct kvm_s390_pv_sec_parm {
 	__u64 origin;

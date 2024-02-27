@@ -16,6 +16,7 @@
  */
 
 #include "asm/page_types.h"
+#include "asm/pgtable_types.h"
 #include "irq.h"
 #include "ioapic.h"
 #include "mmu.h"
@@ -4326,7 +4327,7 @@ int kvm_handle_page_fault(struct kvm_vcpu *vcpu, u64 error_code,
 EXPORT_SYMBOL_GPL(kvm_handle_page_fault);
 
 int kvm_mmu_map_page(struct kvm_vcpu *vcpu, gpa_t gpa, u32 err,
-			 int max_level) {
+			 int max_level, u32 *goal_level) {
 
 	int r;
 	struct kvm_page_fault fault = {
@@ -4351,10 +4352,11 @@ int kvm_mmu_map_page(struct kvm_vcpu *vcpu, gpa_t gpa, u32 err,
 	fault.gfn = gpa_to_gfn(fault.addr);
 	fault.slot = kvm_vcpu_gfn_to_memslot(vcpu, fault.gfn);
   
-  // r = mmu_topup_memory_caches(vcpu, false);
+  r = mmu_topup_memory_caches(vcpu, false);
   r = kvm_tdp_page_fault(vcpu, &fault);
 
-  // mmu_free_memory_caches(vcpu);
+  *goal_level = fault.goal_level;
+
 	if (is_error_noslot_pfn(fault.pfn) || vcpu->kvm->vm_bugged)
 		return -EFAULT;
 

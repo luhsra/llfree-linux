@@ -14,6 +14,7 @@
  */
 
 #include "asm-generic/errno-base.h"
+#include "asm/kvm_host.h"
 #include "linux/kern_levels.h"
 #include "mmu/mmu_internal.h"
 #include <kvm/iodev.h>
@@ -2084,6 +2085,7 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	u64 error_code;
 	u64 nr_pages_iter;
 	u64 gpa_iter;
+	u32 goal_level;
 	int idx, ret, pinned_pages = 0;
 
 	if (!atomic_read(&kvm->online_vcpus))
@@ -2103,8 +2105,6 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	vcpu = kvm_get_vcpu(kvm, 0);
 	idx = srcu_read_lock(&kvm->srcu);
 	kvm_mmu_reload(vcpu);
-
-	printk(KERN_WARNING "KVM Mapping %x num pages\n", map_region->nr_pages);
 
 	// Pin the source pages
 	// is there something like a pin limit that might be annoying for our bulk get_user_pages_fast? ...
@@ -2137,11 +2137,10 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 
 		/* TODO: large page support. */
 		error_code = PFERR_WRITE_MASK;
-		ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code, PG_LEVEL_4K);
 
 		for (uint32_t i = 0; i < 2; i++) {
 			ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code,
-					       PG_LEVEL_4K);
+					       PG_LEVEL_2M, &goal_level);
 			if (ret != -EAGAIN) {
 				break;
 			}
@@ -2153,8 +2152,8 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 			break;
 		}
 
-		gpa_iter += PAGE_SIZE;
-		nr_pages_iter--;
+		gpa_iter += KVM_PAGES_PER_HPAGE(goal_level);
+		nr_pages_iter -= KVM_PAGES_PER_HPAGE(goal_level);
 	}
 
 	for (uint32_t i = 0; i < map_region->nr_pages; i++) {

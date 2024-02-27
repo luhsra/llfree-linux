@@ -1097,11 +1097,15 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
 {
+	llfree_result_t ret;
 	u64 cpu = get_cpu();
-	u64 ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
+	s64 frame = page_to_pfn(page) -
+		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
-	if (ret != 0) {
-		pr_err("llfree: err %lld", ret);
+	if (!llfree_ok(ret)) {
+		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
 }
@@ -1109,16 +1113,21 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 					   unsigned int order)
 {
-	u64 ret, cpu;
+	llfree_result_t ret;
+	u64 cpu;
+	s64 frame;
 	/* clear reported state and update reported page count */
 	if (page_reported(page))
 		__ClearPageReported(page);
 
 	cpu = get_cpu();
-	ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
+	frame = page_to_pfn(page) -
+		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
-	if (ret != 0) {
-		pr_err("llfree: err %lld", ret);
+	if (!llfree_ok(ret)) {
+		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -1161,7 +1170,9 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	// page, pfn, zone, order are clear
 	// migratetype: memory compaction -> disable for now
 	// fpi_flags: buddy alloc specific (free notifications, list opt, kasan poisioning)
-	u64 ret, cpu;
+	llfree_result_t ret;
+	u64 cpu;
+	s64 frame;
 	struct capture_control *capc = task_capc(zone);
 
 	VM_BUG_ON(zone->llfree == NULL);
@@ -1171,11 +1182,15 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	    !compaction_capture(capc, page, order, migratetype))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
-	ret = llfree_put(zone->llfree, cpu, page_to_virt(page), order);
+	frame = page_to_pfn(page) -
+		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+	ret = llfree_put(zone->llfree, cpu, frame, order);
+
 	put_cpu();
 
-	if (ret != 0) {
-		pr_err("llfree: err %lld", ret);
+	if (!llfree_ok(ret)) {
+		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -3328,8 +3343,8 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 #else
 	if (zone->llfree) {
 		int cpu = smp_processor_id();
-		int ret = llfree_drain(zone->llfree, cpu);
-		BUG_ON(llfree_err(ret));
+		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
+		BUG_ON(!llfree_ok(ret));
 	}
 #endif
 }
@@ -3354,8 +3369,8 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 	}
 #else
 	if (zone->llfree) {
-		int ret = llfree_drain(zone->llfree, cpu);
-		BUG_ON(llfree_err(ret));
+		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
+		BUG_ON(!llfree_ok(ret));
 	}
 #endif
 }
@@ -4075,17 +4090,19 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 {
 	struct page *page = NULL;
 	int cpu;
-	u8 *addr;
+	llfree_result_t res;
 
 	cpu = get_cpu();
-	addr = llfree_get(zone->llfree, cpu, order);
+	res = llfree_get(zone->llfree, cpu, order);
 
-	if (llfree_err((u64)addr)) {
+	if (!llfree_ok(res)) {
 		put_cpu();
-		pr_err("llfree: err %lld", (u64)addr);
-		BUG_ON((u64)addr != LLFREE_ERROR_MEMORY);
+		pr_err("llfree: err %lld", res.val);
+		BUG_ON(res.val != LLFREE_ERR_MEMORY);
 	} else {
-		page = virt_to_page(addr);
+		size_t offset =
+			ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		page = pfn_to_page(offset + res.val);
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
@@ -4529,7 +4546,6 @@ retry:
 		}
 
 try_this_zone:
-		// TODO: Infinite loop on failed allocation!
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {

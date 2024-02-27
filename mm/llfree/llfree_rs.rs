@@ -1,38 +1,66 @@
 #![no_std]
 #![feature(int_roundings)]
 #![feature(alloc_error_handler)]
+#![feature(c_size_t)]
 
-#[allow(unused_imports)]
-#[macro_use]
-extern crate alloc;
-
-use core::alloc::{GlobalAlloc, Layout};
-use core::ffi::{c_char, c_void};
+use core::ffi::{c_char, c_size_t, c_void};
 use core::fmt::{self, Write};
+use core::mem::{align_of, size_of};
 use core::panic::PanicInfo;
-use core::sync::atomic::{self, AtomicU64, Ordering};
+use core::ptr::null_mut;
+use core::slice;
 
-use alloc::boxed::Box;
 use log::{error, warn, Level, Metadata, Record};
 
-use llfree::frame::{Frame, PFNRange, PFN};
-use llfree::Alloc;
-use llfree::Error;
-use llfree::Init::{Recover, Volatile};
-use llfree::LLFree;
+use llfree::util::{align_down, Align};
+use llfree::{Alloc, Error, Init::AllocAll, LLFree as LLFreeRaw, MetaSize, Result};
 
 const MOD: &[u8] = b"llfree\0";
 
 extern "C" {
     /// Linux provided alloc function
-    fn llfree_linux_alloc(node: u64, size: u64, align: u64) -> *mut u8;
+    fn llfree_linux_alloc(node: c_size_t, size: c_size_t, align: c_size_t) -> *mut u8;
     /// Linux provided free function
-    fn llfree_linux_free(ptr: *mut u8, size: u64, align: u64);
+    fn llfree_linux_free(ptr: *mut u8, size: c_size_t, align: c_size_t);
     /// Linux provided printk function
     fn llfree_linux_printk(format: *const u8, module_name: *const u8, args: *const c_void);
+    /// Trigger a kernel panic
+    fn llfree_panic() -> !;
 }
 
-static NODE_ID: AtomicU64 = AtomicU64::new(0);
+type LLFree = LLFreeRaw<'static>;
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct result_t {
+    pub val: i64,
+}
+impl From<Error> for result_t {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::Memory => Self { val: -1 },
+            Error::Retry => Self { val: -2 },
+            Error::Address => Self { val: -3 },
+            Error::Initialization => Self { val: -4 },
+        }
+    }
+}
+impl From<Result<()>> for result_t {
+    fn from(value: Result<()>) -> Self {
+        match value {
+            Ok(_) => result_t { val: 0 },
+            Err(e) => e.into(),
+        }
+    }
+}
+impl From<Result<usize>> for result_t {
+    fn from(value: Result<usize>) -> Self {
+        match value {
+            Ok(v) => result_t { val: v as _ },
+            Err(e) => e.into(),
+        }
+    }
+}
 
 /// Initialize the allocator for the given memory range.
 /// If `overwrite` is nonzero no existing allocator state is recovered.
@@ -40,40 +68,44 @@ static NODE_ID: AtomicU64 = AtomicU64::new(0);
 #[cold]
 #[link_section = ".init.text"]
 #[no_mangle]
-pub extern "C" fn llfree_init(
-    node: u64,
-    cores: u32,
-    persistent: u8,
-    start: *mut c_void,
-    pages: u64,
-) -> *mut c_void {
+pub extern "C" fn llfree_node_init(
+    node: c_size_t,
+    cores: c_size_t,
+    start_pfn: u64,
+    pages: c_size_t,
+) -> *mut LLFree {
+    const ALIGN: usize = align_of::<Align>();
+
     init_logging();
 
-    warn!("Initializing inside rust");
+    if pages == 0 {
+        return null_mut();
+    }
 
-    let init = if persistent == 0 { Volatile } else { Recover };
-    // Linux usually initializes its allocator with all memory occupied and afterwards frees the avaliable memory of the boot allocator.
-    // If persistent, we have to store our own metadata into the zone, thus require the memory to be avaliable.
-    let free_all = persistent != 0;
-    assert!(start as usize % Frame::SIZE == 0, "Invalid alignment");
+    let offset = align_down(start_pfn as usize, 1 << LLFree::MAX_ORDER);
+    let frames = pages as usize + (start_pfn as usize - offset);
 
-    // Set zone id for allocations
-    NODE_ID.store(node, Ordering::Release);
+    // Allocate metadata
+    let MetaSize { primary, secondary } = LLFree::metadata_size(cores, frames);
+    let primary_buf = unsafe { llfree_linux_alloc(node, primary, ALIGN) };
+    let p = unsafe { slice::from_raw_parts_mut(primary_buf, primary) };
+    let secondary_buf = unsafe { llfree_linux_alloc(node, primary, ALIGN) };
+    let s = unsafe { slice::from_raw_parts_mut(secondary_buf, primary) };
 
-    if pages > 0 {
-        let pfn = PFN::from_ptr(start.cast());
-        let area = pfn..pfn.off(pages as _);
-
-        match LLFree::new(cores as _, area.clone(), init, free_all) {
-            Ok(alloc) => {
-                warn!("setup mem={:?} ({})", area.as_ptr_range(), alloc.frames());
-                // Move to newly allocated memory and leak address
-                Box::leak(Box::new(alloc)) as *mut LLFree as _
-            }
-            Err(e) => e as usize as _,
-        }
-    } else {
-        Error::Initialization as usize as _
+    warn!("setup mem={offset:x} ({frames})");
+    match LLFree::new(cores, frames, AllocAll, p, s) {
+        Ok(alloc) => unsafe {
+            // Move to newly allocated memory and leak address
+            let dst = llfree_linux_alloc(node, size_of::<LLFree>(), ALIGN);
+            core::ptr::write(dst.cast(), alloc);
+            dst.cast()
+        },
+        Err(e) => unsafe {
+            llfree_linux_free(primary_buf, primary, ALIGN);
+            llfree_linux_free(secondary_buf, secondary, ALIGN);
+            error!("init failed: {e:?}");
+            null_mut()
+        },
     }
 }
 
@@ -82,52 +114,43 @@ pub extern "C" fn llfree_init(
 #[no_mangle]
 pub extern "C" fn llfree_uninit(alloc: *mut LLFree) {
     if !alloc.is_null() {
-        unsafe { core::mem::drop(Box::from_raw(alloc as *mut LLFree)) };
+        unsafe {
+            core::ptr::drop_in_place(alloc);
+            llfree_linux_free(alloc.cast(), size_of::<LLFree>(), align_of::<Align>());
+        }
     }
 }
 
 /// Allocates 2^order pages. Returns >=PAGE_SIZE on success an error code.
 #[no_mangle]
-pub extern "C" fn llfree_get(alloc: *const LLFree, core: u32, order: u32) -> *mut u8 {
+pub extern "C" fn llfree_get(alloc: *const LLFree, core: c_size_t, order: c_size_t) -> result_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        match alloc.get(core as _, order as _) {
-            Ok(addr) => addr.as_ptr_mut().cast(),
-            Err(e) => e as u64 as _,
-        }
+        alloc.get(core, order).into()
     } else {
-        Error::Initialization as u64 as _
+        Error::Initialization.into()
     }
 }
 
 /// Frees a previously allocated page. Returns 0 on success or an error code.
 #[no_mangle]
-pub extern "C" fn llfree_put(alloc: *const LLFree, core: u32, addr: *mut u8, order: u32) -> u64 {
+pub extern "C" fn llfree_put(
+    alloc: *const LLFree,
+    core: c_size_t,
+    frame: u64,
+    order: c_size_t,
+) -> result_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        match alloc.put(core as _, PFN::from_ptr(addr.cast()), order as _) {
-            Ok(_) => 0,
-            Err(e) => e as u64,
-        }
+        alloc.put(core, frame as _, order).into()
     } else {
-        Error::Initialization as u64
+        Error::Initialization.into()
     }
 }
 
+#[cold]
 #[no_mangle]
-pub extern "C" fn llfree_drain(alloc: *const LLFree, core: u32) -> u64 {
+pub extern "C" fn llfree_cores(alloc: *const LLFree) -> c_size_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        match alloc.drain(core as _) {
-            Ok(_) => 0,
-            Err(e) => e as u64,
-        }
-    } else {
-        Error::Initialization as u64
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn llfree_is_free(alloc: *const LLFree, addr: *mut u8, order: u32) -> u64 {
-    if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.is_free(PFN::from_ptr(addr.cast()), order as _) as _
+        alloc.cores()
     } else {
         0
     }
@@ -135,9 +158,9 @@ pub extern "C" fn llfree_is_free(alloc: *const LLFree, addr: *mut u8, order: u32
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_free_count(alloc: *const LLFree) -> u64 {
+pub extern "C" fn llfree_frames(alloc: *const LLFree) -> c_size_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.free_frames() as u64
+        alloc.cores()
     } else {
         0
     }
@@ -145,11 +168,49 @@ pub extern "C" fn llfree_free_count(alloc: *const LLFree) -> u64 {
 
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_free_huge_count(alloc: *const LLFree) -> u64 {
+pub extern "C" fn llfree_free_frames(alloc: *const LLFree) -> c_size_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.free_huge_frames() as u64
+        alloc.free_frames()
     } else {
         0
+    }
+}
+
+#[cold]
+#[no_mangle]
+pub extern "C" fn llfree_free_huge(alloc: *const LLFree) -> c_size_t {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.free_huge_frames()
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn llfree_is_free(alloc: *const LLFree, frame: u64, order: c_size_t) -> bool {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.is_free(frame as _, order)
+    } else {
+        false
+    }
+}
+
+#[cold]
+#[no_mangle]
+pub extern "C" fn llfree_free_at(alloc: *const LLFree, frame: u64, order: c_size_t) -> c_size_t {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.free_at(frame as _, order)
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn llfree_drain(alloc: *const LLFree, core: c_size_t) -> result_t {
+    if let Some(alloc) = unsafe { alloc.as_ref() } {
+        alloc.drain(core).into()
+    } else {
+        Error::Initialization.into()
     }
 }
 
@@ -161,60 +222,20 @@ pub extern "C" fn llfree_printk(alloc: *const LLFree) {
     }
 }
 
-#[cold]
-#[no_mangle]
-pub extern "C" fn llfree_for_each_huge_page(
-    alloc: *const LLFree,
-    f: extern "C" fn(*mut c_void, u16),
-    arg: *mut c_void,
-) {
-    if let Some(alloc) = unsafe { alloc.as_ref() } {
-        alloc.for_each_huge_frame(|_, free| f(arg, free as _))
-    }
-}
-
 /// # Safety
 /// This writes into the provided memory buffer which has to be valid.
 #[cold]
 #[no_mangle]
-pub extern "C" fn llfree_dump(alloc: *const LLFree, buf: *mut u8, len: u64) -> u64 {
+pub extern "C" fn llfree_dump(alloc: *const LLFree, buf: *mut u8, len: c_size_t) -> c_size_t {
     if let Some(alloc) = unsafe { alloc.as_ref() } {
         let mut writer =
-            unsafe { RawFormatter::from_ptrs(buf, (buf as usize).saturating_add(len as _) as _) };
+            unsafe { RawFormatter::from_ptrs(buf, (buf as usize).saturating_add(len) as _) };
         if writeln!(writer, "{alloc:?}").is_err() {
             error!("write failed after {}B", writer.bytes_written());
         }
-        writer.bytes_written() as _
+        writer.bytes_written()
     } else {
         0
-    }
-}
-
-struct LinuxAlloc;
-unsafe impl GlobalAlloc for LinuxAlloc {
-    #[cold]
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        llfree_linux_alloc(
-            NODE_ID.load(Ordering::Acquire),
-            layout.size() as _,
-            layout.align() as _,
-        )
-    }
-
-    #[cold]
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        llfree_linux_free(ptr, layout.size() as _, layout.align() as _);
-    }
-}
-
-#[global_allocator]
-static LINUX_ALLOC: LinuxAlloc = LinuxAlloc;
-
-#[alloc_error_handler]
-pub fn on_oom(layout: Layout) -> ! {
-    error!("Unable to allocate {} bytes", layout.size());
-    loop {
-        atomic::compiler_fence(Ordering::SeqCst);
     }
 }
 
@@ -222,9 +243,7 @@ pub fn on_oom(layout: Layout) -> ! {
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
     error!("{info}");
-    loop {
-        atomic::compiler_fence(Ordering::SeqCst);
-    }
+    unsafe { llfree_panic() }
 }
 
 /// Printing facilities.

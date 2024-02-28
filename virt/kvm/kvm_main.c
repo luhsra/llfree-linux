@@ -2138,13 +2138,12 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
 	struct kvm_vcpu *vcpu;
-	struct page **pages, **pages_iter;
 	u64 error_code;
 	u64 nr_pages_iter;
 	u64 source_addr_iter;
 	u64 gpa_iter;
 	u32 goal_level;
-	int idx, ret, pinned_pages = 0;
+	int idx, ret;
 
 	if (!atomic_read(&kvm->online_vcpus))
 		return -EINVAL;
@@ -2158,8 +2157,6 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		return -EINVAL;
 	}
 
-	pages = (struct page **)kzalloc(
-		map_region->nr_pages * sizeof(struct page *), GFP_KERNEL);
 	vcpu = kvm_get_vcpu(kvm, 0);
 	idx = srcu_read_lock(&kvm->srcu);
 	kvm_mmu_reload(vcpu);
@@ -2167,7 +2164,6 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	nr_pages_iter = map_region->nr_pages;
 	gpa_iter = map_region->gpa;
 	source_addr_iter = map_region->source_addr;
-	pages_iter = pages;
 	while (nr_pages_iter) {
 		if (signal_pending(current)) {
 			ret = -ERESTARTSYS;
@@ -2179,24 +2175,6 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 
 		/* TODO: large page support. */
 		error_code = PFERR_WRITE_MASK;
-
-		// Pin the source pages
-		if (!(gpa_iter & ((1 << 21) - 1))) {
-			pinned_pages = get_user_pages_fast(source_addr_iter,
-							   512, 0, pages_iter);
-			pages_iter += 512;
-
-			if (pinned_pages < 0) {
-				printk(KERN_WARNING
-				       "kvm_vm_ioctl_map_memory_region: pinning failed completely");
-			}
-
-			if (pinned_pages != 512) {
-				printk(KERN_WARNING
-				       "kvm_vm_ioctl_map_memory_region: could only pin %d out of %lu\n",
-				       pinned_pages, map_region->nr_pages);
-			}
-		}
 
 		for (uint32_t i = 0; i < 3; i++) {
 			ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code,
@@ -2223,14 +2201,8 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		}
 	}
 
-	for (uint32_t i = 0; i < map_region->nr_pages; i++) {
-		if (pages[i] != NULL) {
-			put_page(pages[i]);
-		}
-	}
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 
-	kfree(pages);
 	return 0;
 }
 

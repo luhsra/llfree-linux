@@ -98,13 +98,13 @@ uint64_t consume_test_base_page(uint32_t num_gib, gfp_t alloc_flags)
 		printk(KERN_ERR "NOT ENOUGH MEM NULL POINTER\n");
 	}
 
+	start_time_ns = ktime_get_ns();
 	for (uint32_t i = 0; i < num_gib * BASE_PAGES_PER_GIB; i++) {
 		// same flags as virtio-balloon
 		page = alloc_page(alloc_flags);
 		ihpq[i] = page_to_pfn(page);
 	}
 
-	start_time_ns = ktime_get_ns();
 	for (uint32_t i = 0; i < num_gib * BASE_PAGES_PER_GIB; i++) {
 		consume_ptr = (uint32_t *)page_to_virt(pfn_to_page(ihpq[i]));
 		*consume_ptr = 0xff;
@@ -142,7 +142,6 @@ uint64_t consume_test_huge_page(uint32_t num_gib, gfp_t alloc_flags)
 		ihpq[i] = page_to_pfn(page);
 	}
 
-	start_time_ns = ktime_get_ns();
 	for (uint32_t i = 0; i < num_gib * HUGE_PAGES_PER_GIB; i++) {
 		// consume page and (potentially) trigger ept violation
 		consume_ptr = (uint8_t *)page_to_virt(pfn_to_page(ihpq[i]));

@@ -2190,16 +2190,11 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 			break;
 		}
 
-		if (goal_level == 1) {
-			source_addr_iter += PAGE_SIZE;
-			gpa_iter += PAGE_SIZE;
-			nr_pages_iter -= 1;
-		} else if (goal_level == 2) {
-			source_addr_iter += PAGE_SIZE * 512;
-			gpa_iter += PAGE_SIZE * 512;
-			nr_pages_iter -= 512;
-		}
-	}
+		source_addr_iter += KVM_HPAGE_SIZE(goal_level);
+		gpa_iter += KVM_HPAGE_SIZE(goal_level);
+		nr_pages_iter -= KVM_PAGES_PER_HPAGE(goal_level);
+
+}
 
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 

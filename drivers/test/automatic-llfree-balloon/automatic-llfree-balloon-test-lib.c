@@ -205,6 +205,7 @@ uint64_t alloc_test_multithreaded(uint32_t num_gib)
 	struct task_struct *alloc_threads[NUM_THREADS];
 	struct alloc_thread_data alloc_threads_data[NUM_THREADS];
 	struct completion comps[NUM_THREADS];
+	struct pglist_data *pgdat = NODE_DATA(first_online_node);
 
 	for (uint32_t i = 0; i < NUM_THREADS; i++) {
 		init_completion(&comps[i]);
@@ -215,7 +216,6 @@ uint64_t alloc_test_multithreaded(uint32_t num_gib)
 	alloc_threads_data[0].alloc_flags = ZONE_NORMAL_FLAGS;
 	alloc_threads_data[1].alloc_flags = ZONE_DMA_FLAGS;
 
-	struct pglist_data *pgdat = NODE_DATA(first_online_node);
 	alloc_threads_data[0].zone = &pgdat->node_zones[ZONE_NORMAL];
 	alloc_threads_data[1].zone = &pgdat->node_zones[ZONE_NORMAL];
 

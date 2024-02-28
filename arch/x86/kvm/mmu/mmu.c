@@ -4352,7 +4352,7 @@ int kvm_mmu_map_page(struct kvm_vcpu *vcpu, gpa_t gpa, u32 err,
 	fault.gfn = gpa_to_gfn(fault.addr);
 	fault.slot = kvm_vcpu_gfn_to_memslot(vcpu, fault.gfn);
   
-  r = mmu_topup_memory_caches(vcpu, false);
+  // r = mmu_topup_memory_caches(vcpu, false);
   r = kvm_tdp_page_fault(vcpu, &fault);
 
   *goal_level = fault.goal_level;

@@ -142,6 +142,7 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 		}
 
 		vb->qemu_info.zone_type = vb->map_zone_type[i];
+		vb->qemu_info.zone_start_pfn = zone->zone_start_pfn;
 		vb->qemu_info.numa_node_id = pgdat->node_id;
 		vb->qemu_info.qemu_llfree = (llfree_t *)zone->llfree;
 		vb->qemu_info.zone_free_pages =

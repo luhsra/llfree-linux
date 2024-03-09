@@ -8,6 +8,7 @@
 
 typedef struct llfree_zone_info {
 	llfree_t *qemu_llfree;
+	uint32_t zone_start_pfn;
 	uint32_t zone_type;
 	uint32_t numa_node_id;
 	_Atomic(int64_t) *zone_free_pages;

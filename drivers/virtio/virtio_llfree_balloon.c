@@ -31,14 +31,8 @@
 #define FEATURE_IS_DISABLED(vdev, bit) !virtio_has_feature(vdev, bit)
 
 /*-----------------------------------------------------------------------------------------------
-| Enums
+| Shared Structs and Enums
 -------------------------------------------------------------------------------------------------*/
-enum virtio_llfree_balloon_vq {
-	VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ,
-	VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ,
-	VIRTIO_LLFREE_BALLOON_VQ_MAX,
-};
-
 enum llfree_zone_type {
 	LLFREE_NON_EXISTING,
 	LLFREE_ZONE_DMA,
@@ -55,14 +49,6 @@ enum RequestType {
 };
 typedef enum RequestType RequestType;
 
-/*-----------------------------------------------------------------------------------------------
-| Structs
--------------------------------------------------------------------------------------------------*/
-struct llfree_vq_buffer {
-	void *buf;
-	size_t len;
-};
-
 struct LLFreeBalloonRequest {
 	RequestType req;
 };
@@ -74,6 +60,13 @@ struct AutoDeflateInfo {
   uint32_t core;
 };
 typedef struct AutoDeflateInfo AutoDeflateInfo;
+/*-----------------------------------------------------------------------------------------------
+| Structs
+-------------------------------------------------------------------------------------------------*/
+struct llfree_vq_buffer {
+	void *buf;
+	size_t len;
+};
 
 struct virtio_llfree_balloon {
 	struct virtio_device *vdev;
@@ -89,6 +82,14 @@ struct virtio_llfree_balloon {
 };
 
 static struct virtio_llfree_balloon *vb_llfree;
+/*-----------------------------------------------------------------------------------------------
+| Enums
+-------------------------------------------------------------------------------------------------*/
+enum virtio_llfree_balloon_vq {
+	VIRTIO_LLFREE_BALLOON_LLFREE_INFO_VQ,
+	VIRTIO_LLFREE_BALLOON_LLFREE_REQUEST_VQ,
+	VIRTIO_LLFREE_BALLOON_VQ_MAX,
+};
 
 /*-----------------------------------------------------------------------------------------------
 | Helper Functions

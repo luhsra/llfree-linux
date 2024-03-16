@@ -1179,6 +1179,8 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_S390_CPU_TOPOLOGY 222
 #define KVM_CAP_DIRTY_LOG_RING_ACQ_REL 223
 
+#define KVM_CAP_MAP_MEMORY_REGION 400
+
 #ifdef KVM_CAP_IRQ_ROUTING
 
 struct kvm_irq_routing_irqchip {
@@ -1461,7 +1463,7 @@ struct kvm_map_region {
 					struct kvm_userspace_memory_region)
 #define KVM_SET_TSS_ADDR          _IO(KVMIO,   0x47)
 #define KVM_SET_IDENTITY_MAP_ADDR _IOW(KVMIO,  0x48, __u64)
-#define KVM_MAP_GFN_RANGE         _IOW(KVMIO,  0x49, struct kvm_map_region)
+#define KVM_MAP_MEMORY_REGION         _IOW(KVMIO,  0x49, struct kvm_map_region)
 
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {

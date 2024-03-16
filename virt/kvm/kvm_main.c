@@ -4766,7 +4766,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = kvm_vm_ioctl_set_memory_region(kvm, &kvm_userspace_mem);
 		break;
 	}
-	case KVM_MAP_GFN_RANGE: {
+	case KVM_MAP_MEMORY_REGION: {
 		struct kvm_map_region map_region;
 
 		r = -EFAULT;

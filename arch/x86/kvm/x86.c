@@ -4340,6 +4340,7 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	int r = 0;
 
 	switch (ext) {
+	case KVM_CAP_MAP_MEMORY_REGION:
 	case KVM_CAP_IRQCHIP:
 	case KVM_CAP_HLT:
 	case KVM_CAP_MMU_SHADOW_CACHE_CONTROL:

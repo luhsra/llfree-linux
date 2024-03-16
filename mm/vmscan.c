@@ -61,6 +61,7 @@
 #include <linux/swapops.h>
 #include <linux/balloon_compaction.h>
 #include <linux/sched/sysctl.h>
+#include <linux/vmscan.h>
 
 #include "internal.h"
 #include "swap.h"

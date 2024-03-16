@@ -17,10 +17,9 @@
 #include <linux/wait.h>
 #include <linux/mm.h>
 #include <linux/page_reporting.h>
+#include <linux/vmscan.h>
 #include "llfree_qemu.h"
 
-extern uint32_t shrink_pagecache_for_reclaim(uint32_t num_numa_node,
-					     uint32_t nr_to_reclaim);
 /*-----------------------------------------------------------------------------------------------
 | Defines
 -------------------------------------------------------------------------------------------------*/

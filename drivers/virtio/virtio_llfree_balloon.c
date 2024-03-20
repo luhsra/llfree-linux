@@ -57,7 +57,7 @@ typedef struct LLFreeBalloonRequest LLFreeBalloonRequest;
 struct AutoDeflateInfo {
 	uint32_t numa_node_id;
 	uint32_t zone_type;
-  uint32_t core;
+	uint32_t core;
 };
 typedef struct AutoDeflateInfo AutoDeflateInfo;
 /*-----------------------------------------------------------------------------------------------
@@ -421,7 +421,7 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 		uint32_t num_cores;
 		num_cores = num_online_cpus();
 		vb->auto_deflate_info = kzalloc(
-			sizeof(AutoDeflateInfo *) * num_cores, GFP_KERNEL);
+			sizeof(AutoDeflateInfo) * num_cores, GFP_KERNEL);
 		vb->llfree_auto_deflate_vqs = kzalloc(
 			sizeof(struct virtqueue *) * num_cores, GFP_KERNEL);
 		if (!vb->llfree_auto_deflate_vqs) {

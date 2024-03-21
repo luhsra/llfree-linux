@@ -1332,7 +1332,7 @@ static bool set_spte_gfn(struct kvm *kvm, struct tdp_iter *iter,
 
 	if (!pte_write(range->pte)) {
 		new_spte = kvm_mmu_changed_pte_notifier_make_spte(iter->old_spte,
-								  pte_pfn_debug(range->pte));
+								  pte_pfn(range->pte));
 
 		tdp_mmu_set_spte(kvm, iter, new_spte);
 	}

@@ -191,16 +191,6 @@ static inline unsigned long pte_pfn(pte_t pte)
 	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
 }
 
-static inline unsigned long pte_pfn_debug(pte_t pte)
-{
-	phys_addr_t pfn = pte_val(pte);
-  printk(KERN_WARNING "pte_pfn: pfn %llx", pfn);
-	/* pfn ^= protnone_mask(pfn); */
-  printk(KERN_WARNING "pte_pfn: pfn mask %llx", pfn);
-  printk(KERN_WARNING "pte_pfn: pfn return %llx", (pfn & PTE_PFN_MASK) >> PAGE_SHIFT);
-	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
-}
-
 static inline unsigned long pmd_pfn(pmd_t pmd)
 {
 	phys_addr_t pfn = pmd_val(pmd);

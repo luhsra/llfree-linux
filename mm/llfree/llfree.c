@@ -145,7 +145,7 @@ static int __init llfree_init_module(void)
 }
 module_init(llfree_init_module);
 
-#if IS_ENABLED(CONFIG_DEV_DAX)
+#if 0
 struct device *device_dax_driver_find_device_by_devt(dev_t devt);
 
 static __init int find_dax_init(void)

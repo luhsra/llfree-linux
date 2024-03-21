@@ -479,6 +479,7 @@ static struct dax_device_driver device_dax_driver = {
 	.match_always = 1,
 };
 
+#if 0
 /**
  * device_dax_driver_find_device_by_devt() - Find a particular devdax device
  * with a matching devt.
@@ -530,6 +531,7 @@ void *device_dax_find_address_range_by_devt(dev_t devt, u64 *size)
 	return __va(range->range.start);
 }
 EXPORT_SYMBOL(device_dax_find_address_range_by_devt);
+#endif
 
 static int __init dax_init(void)
 {

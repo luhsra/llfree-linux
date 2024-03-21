@@ -15,8 +15,6 @@
  *   Avi Kivity   <avi@qumranet.com>
  */
 
-#include "asm/page_types.h"
-#include "asm/pgtable_types.h"
 #include "irq.h"
 #include "ioapic.h"
 #include "mmu.h"
@@ -4351,7 +4349,7 @@ int kvm_mmu_map_page(struct kvm_vcpu *vcpu, gpa_t gpa, u32 err,
 	WARN_ON_ONCE(!vcpu->arch.mmu->root_role.direct);
 	fault.gfn = gpa_to_gfn(fault.addr);
 	fault.slot = kvm_vcpu_gfn_to_memslot(vcpu, fault.gfn);
-  
+
   // r = mmu_topup_memory_caches(vcpu, false);
   r = kvm_tdp_page_fault(vcpu, &fault);
 

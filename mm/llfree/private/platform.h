@@ -140,6 +140,15 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 						     ATOM_UPDATE_ORDER, \
 						     ATOM_LOAD_ORDER);  \
 	})
+/// Checks if `obj` contains `expected` and writes `disired` to it if so.
+#define atom_cmp_exchange_weak(obj, expected, desired)                \
+	({                                                            \
+		llfree_debug("cmpxchg");                              \
+		__c11_atomic_compare_exchange_weak((obj), (expected), \
+						   (desired),         \
+						   ATOM_UPDATE_ORDER, \
+						   ATOM_LOAD_ORDER);  \
+	})
 
 #define atom_load(obj)                                   \
 	({                                               \
@@ -191,14 +200,13 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 		/* NOLINTBEGIN */                                          \
 		llfree_debug("update");                                    \
 		bool _ret = false;                                         \
-		(old_val) = __c11_atomic_load(atom_ptr, ATOM_LOAD_ORDER);  \
+		(old_val) = atom_load(atom_ptr);                           \
 		while (true) {                                             \
 			__typeof(old_val) value = (old_val);               \
 			if (!(fn)(&value, ##__VA_ARGS__))                  \
 				break;                                     \
-			if (__c11_atomic_compare_exchange_weak(            \
-				    (atom_ptr), &(old_val), value,         \
-				    ATOM_UPDATE_ORDER, ATOM_LOAD_ORDER)) { \
+			if (atom_cmp_exchange_weak((atom_ptr), &(old_val), \
+						   value)) {               \
 				_ret = true;                               \
 				break;                                     \
 			}                                                  \

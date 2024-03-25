@@ -1098,12 +1098,19 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
 {
 	llfree_result_t ret;
-	u64 cpu = get_cpu();
-	s64 frame = page_to_pfn(page) -
-		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	u64 cpu;
+	s64 frame;
+	unsigned long flags;
+
+	frame = page_to_pfn(page) -
+		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 	BUG_ON(frame < 0);
+
+	local_irq_save(flags);
+	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
+	local_irq_restore(flags);
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
@@ -1116,16 +1123,22 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	llfree_result_t ret;
 	u64 cpu;
 	s64 frame;
+	unsigned long flags;
+
 	/* clear reported state and update reported page count */
 	if (page_reported(page))
 		__ClearPageReported(page);
 
-	cpu = get_cpu();
 	frame = page_to_pfn(page) -
-		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 	BUG_ON(frame < 0);
+
+	local_irq_save(flags);
+	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, frame, order);
 	put_cpu();
+	local_irq_restore(flags);
+
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
 		VM_BUG_ON_PAGE(true, page);
@@ -1173,21 +1186,24 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	llfree_result_t ret;
 	u64 cpu;
 	s64 frame;
+	unsigned long flags;
 	struct capture_control *capc = task_capc(zone);
 
 	VM_BUG_ON(zone->llfree == NULL);
 
+	frame = page_to_pfn(page) -
+		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	BUG_ON(frame < 0);
+
+	local_irq_save(flags);
 	cpu = get_cpu();
 	if (likely(!is_migrate_isolate(migratetype)) &&
 	    !compaction_capture(capc, page, order, migratetype))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
-	frame = page_to_pfn(page) -
-		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
-	BUG_ON(frame < 0);
 	ret = llfree_put(zone->llfree, cpu, frame, order);
-
 	put_cpu();
+	local_irq_restore(flags);
 
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
@@ -3342,8 +3358,14 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 	}
 #else
 	if (zone->llfree) {
-		int cpu = smp_processor_id();
-		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
+		u64 cpu;
+		llfree_result_t ret;
+		unsigned long flags;
+		local_irq_save(flags);
+		cpu = get_cpu();
+		ret = llfree_drain(zone->llfree, cpu);
+		put_cpu();
+		local_irq_restore(flags);
 		BUG_ON(!llfree_ok(ret));
 	}
 #endif
@@ -3369,7 +3391,14 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 	}
 #else
 	if (zone->llfree) {
-		llfree_result_t ret = llfree_drain(zone->llfree, cpu);
+		u64 cpu;
+		llfree_result_t ret;
+		unsigned long flags;
+		local_irq_save(flags);
+		cpu = get_cpu();
+		ret = llfree_drain(zone->llfree, cpu);
+		put_cpu();
+		local_irq_restore(flags);
 		BUG_ON(!llfree_ok(ret));
 	}
 #endif
@@ -4090,18 +4119,23 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 {
 	struct page *page = NULL;
 	int cpu;
+	unsigned long flags;
 	llfree_result_t res;
 
+	local_irq_save(flags);
 	cpu = get_cpu();
 	res = llfree_get(zone->llfree, cpu, order);
 
 	if (!llfree_ok(res)) {
 		put_cpu();
+		local_irq_restore(flags);
 		pr_err("llfree: err %lld", res.val);
 		BUG_ON(res.val != LLFREE_ERR_MEMORY);
 	} else {
-		size_t offset =
-			ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		size_t offset;
+		local_irq_restore(flags);
+
+		offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 		page = pfn_to_page(offset + res.val);
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);

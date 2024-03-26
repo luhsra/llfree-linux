@@ -1080,6 +1080,7 @@ static void fill_contig_page_info(struct zone *zone,
 				unsigned int suitable_order,
 				struct contig_page_info *info)
 {
+#ifndef CONFIG_LLFREE
 	unsigned int order;
 
 	info->free_pages = 0;
@@ -1107,6 +1108,15 @@ static void fill_contig_page_info(struct zone *zone,
 			info->free_blocks_suitable += blocks <<
 						(order - suitable_order);
 	}
+#else
+	info->free_pages = llfree_free_frames(zone->llfree);
+	info->free_blocks_total = info->free_pages; // ignore this one...
+	info->free_blocks_suitable = info->free_pages >> suitable_order;
+	if (suitable_order >= HUGETLB_PAGE_ORDER) {
+		size_t free_huge = llfree_free_huge(zone->llfree);
+		info->free_blocks_suitable = free_huge >> (suitable_order - HUGETLB_PAGE_ORDER);
+	}
+#endif
 }
 
 /*
@@ -1136,7 +1146,15 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
 	 * 0 => allocation would fail due to lack of memory
 	 * 1 => allocation would fail due to fragmentation
 	 */
+#ifndef CONFIG_LLFREE
 	return 1000 - div_u64( (1000+(div_u64(info->free_pages * 1000ULL, requested))), info->free_blocks_total);
+#else
+	if (order != 0 || order != HUGETLB_PAGE_ORDER)
+		return -1000; // we support only 4k and huge pages
+	if (info->free_pages < 2 * requested)
+		return 0;
+	return 1000 - div_u64(2000 * requested, info->free_pages);
+#endif
 }
 
 /*

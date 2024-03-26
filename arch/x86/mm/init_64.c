@@ -1365,7 +1365,6 @@ void __init mem_init(void)
 		for_each_populated_zone(zone) {
 			u64 num_pages = llfree_free_frames(zone->llfree);
 			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
-			llfree_print(zone->llfree);
 			zid += 1;
 		}
 	};

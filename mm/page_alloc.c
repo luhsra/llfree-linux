@@ -1113,6 +1113,7 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	local_irq_restore(flags);
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
+		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
 }
@@ -1141,6 +1142,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
+		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -1207,6 +1209,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 
 	if (!llfree_ok(ret)) {
 		pr_err("llfree: err %lld", ret.val);
+		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -4132,6 +4135,8 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		put_cpu();
 		local_irq_restore(flags);
 		pr_err("llfree: err %lld", res.val);
+		if (res.val != LLFREE_ERR_MEMORY)
+			llfree_print(zone->llfree);
 		BUG_ON(res.val != LLFREE_ERR_MEMORY);
 	} else {
 		size_t offset;

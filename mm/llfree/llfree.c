@@ -82,17 +82,27 @@ static int llfree_show(struct seq_file *m, void *arg)
 
 	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
 		llfree_t *llfree = zone->llfree;
+		size_t free_trees = 0;
 
 		if (!populated_zone(zone))
 			continue;
 
+		for (size_t i = 0; i < llfree->trees_len; i++) {
+			tree_t t = atom_load(&llfree->trees[i]);
+			if (t.free == LLFREE_TREE_SIZE)
+				free_trees++;
+		}
+
 		preempt_disable();
 		seq_printf(m,
-			   "LLC { frames: %" PRIuS "/%" PRIuS ", huge: %" PRIuS
+			   "LLC { cores: %" PRIuS ", frames: %" PRIuS "/%" PRIuS
+			   ", huge: %" PRIuS "/%" PRIuS ", trees: %" PRIuS
 			   "/%" PRIuS " }\n",
-			   llfree_free_frames(llfree), llfree->lower.frames,
+			   llfree->cores, llfree_free_frames(llfree),
+			   llfree->lower.frames,
 			   lower_free_huge(&llfree->lower),
-			   llfree->lower.children_len);
+			   llfree->lower.children_len, free_trees,
+			   llfree->trees_len);
 		preempt_enable();
 	}
 	return 0;

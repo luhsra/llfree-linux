@@ -36,7 +36,7 @@
 #define LLFREE_CHILD_SIZE (1u << LLFREE_CHILD_ORDER)
 
 /// Number of frames in a tree
-#define LLFREE_TREE_CHILDREN_ORDER 5u
+#define LLFREE_TREE_CHILDREN_ORDER 4u
 #define LLFREE_TREE_CHILDREN (1u << LLFREE_TREE_CHILDREN_ORDER)
 #define LLFREE_TREE_ORDER (LLFREE_HUGE_ORDER + LLFREE_TREE_CHILDREN_ORDER)
 #define LLFREE_TREE_SIZE (1u << LLFREE_TREE_ORDER)
@@ -46,10 +46,17 @@
 
 #define llfree_warn(str, ...) pr_warn(str, ##__VA_ARGS__)
 
+#define VERBOSE 1
 #ifdef VERBOSE
+#define llfree_info_start() pr_info("")
+#define llfree_info_cont(str, ...) pr_cont(str, ##__VA_ARGS__)
+#define llfree_info_end()
 #define llfree_info(str, ...) pr_info(str, ##__VA_ARGS__)
 #else
 #define llfree_info(str, ...)
+#define llfree_info_start()
+#define llfree_info_cont(str, ...)
+#define llfree_info_end()
 #endif
 
 #ifdef DEBUG

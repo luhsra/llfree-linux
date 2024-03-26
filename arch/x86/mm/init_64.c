@@ -1337,19 +1337,10 @@ void __init mem_init_llfree(void)
 	struct zone *zone;
 
 	for_each_populated_zone(zone) {
-		llfree_t *llfree;
-
-		pr_info("llfree: init on %u cpus (start %x)",
-			num_possible_cpus(), zone->zone_start_pfn);
-		llfree = llfree_node_init(zone->node, num_possible_cpus(),
-					  zone->zone_start_pfn,
-					  zone->spanned_pages);
-		if (llfree == NULL) {
-			pr_err("llfree: init failure");
-			BUG();
-		}
-
-		zone->llfree = llfree;
+		zone->llfree = llfree_node_init(zone->node, num_possible_cpus(),
+						zone->zone_start_pfn,
+						zone->spanned_pages);
+		BUG_ON(zone->llfree == NULL);
 	}
 }
 
@@ -1374,6 +1365,7 @@ void __init mem_init(void)
 		for_each_populated_zone(zone) {
 			u64 num_pages = llfree_free_frames(zone->llfree);
 			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
+			llfree_print(zone->llfree);
 			zid += 1;
 		}
 	};

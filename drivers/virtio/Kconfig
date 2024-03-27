@@ -115,6 +115,16 @@ config VIRTIO_BALLOON
 
 	 If unsure, say M.
 
+config VIRTIO_BALLOON_ENABLE_BENCHMARK_MODIFICATIONS
+	tristate "enable virtio-balloon benchmarking modifications"
+	depends on VIRTIO_BALLOON
+	depends on VIRTIO
+	select MEMORY_BALLOON
+	select PAGE_REPORTING
+	help
+    This enables a minor modification to virtio-balloon, which allows to more
+    accurately benchmark its deflate operation.
+
 config VIRTIO_LLFREE_BALLOON
 	tristate "Virtio llfree balloon driver"
 	depends on VIRTIO

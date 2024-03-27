@@ -289,6 +289,8 @@ static unsigned int leak_balloon(struct virtio_balloon *vb, size_t num)
 	}
 
 	num_freed_pages = vb->num_pfns;
+
+#ifndef CONFIG_VIRTIO_BALLOON_ENABLE_BENCHMARK_MODIFICATIONS
 	/*
 	 * Note that if
 	 * virtio_has_feature(vdev, VIRTIO_BALLOON_F_MUST_TELL_HOST);
@@ -297,6 +299,20 @@ static unsigned int leak_balloon(struct virtio_balloon *vb, size_t num)
 	if (vb->num_pfns != 0)
 		tell_host(vb, vb->deflate_vq);
 	release_pages_balloon(vb, &pages);
+#else
+	/*
+   * For benchmarking, first release pages, then trigger virtqueue to notify
+   * virtio-balloons device handler function. Otherwise, we can't measure the time
+   * it takes virtio-balloon to release the pages during the deflation.
+   *
+   * Besides, functionally it shouldn't make much of a difference - as far as 
+   * I understand MADV_WILLNEED does not do anything anyways...
+	 */
+	release_pages_balloon(vb, &pages);
+	if (vb->num_pfns != 0)
+		tell_host(vb, vb->deflate_vq);
+#endif
+
 	mutex_unlock(&vb->balloon_lock);
 	return num_freed_pages;
 }

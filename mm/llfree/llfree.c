@@ -101,8 +101,8 @@ static int llfree_show(struct seq_file *m, void *arg)
 			   llfree->cores, llfree_free_frames(llfree),
 			   llfree->lower.frames,
 			   lower_free_huge(&llfree->lower),
-			   llfree->lower.children_len, free_trees,
-			   llfree->trees_len);
+			   div_ceil(llfree->lower.frames, LLFREE_CHILD_SIZE),
+			   free_trees, llfree->trees_len);
 		preempt_enable();
 	}
 	return 0;

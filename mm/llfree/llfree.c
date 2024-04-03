@@ -124,7 +124,7 @@ static int llfree_frag_show(struct seq_file *m, void *arg)
 						     LLFREE_HUGE_ORDER);
 			// [0, 9], where 0 is entirely allocated and 9 is free
 			size_t level = free == 0 ? 0 : (free / 64 + 1);
-			seq_printf(m, "%d", level);
+			seq_printf(m, "%zu", level);
 		}
 		seq_printf(m, "\n");
 	}

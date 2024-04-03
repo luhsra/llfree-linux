@@ -1,5 +1,5 @@
 obj-$(CONFIG_LLFREE) := llfree.o
-obj-$(CONFIG_LLFREE_SIZE_COUNTERS) := size_counters.o
+obj-$(CONFIG_LLFREE_SIZE_COUNTERS) += size_counters.o
 
 ccflags-$(CONFIG_LLFREE) += -I$(srctree)/mm/llfree/private -I$(srctree)/mm/llfree/llc/src
 ccflags-remove-$(CONFIG_LLFREE) := -Wdeclaration-after-statement

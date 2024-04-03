@@ -1109,6 +1109,12 @@ static void fill_contig_page_info(struct zone *zone,
 						(order - suitable_order);
 	}
 #else
+	if (zone->llfree == NULL) {
+		info->free_pages = 0;
+		info->free_blocks_total = 0;
+		info->free_blocks_suitable = 0;
+		return;
+	}
 	info->free_pages = llfree_free_frames(zone->llfree);
 	info->free_blocks_total = info->free_pages; // ignore this one...
 	info->free_blocks_suitable = info->free_pages >> suitable_order;

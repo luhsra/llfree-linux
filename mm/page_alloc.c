@@ -1109,6 +1109,7 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	local_irq_save(flags);
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 	local_irq_restore(flags);
 	if (!llfree_ok(ret)) {
@@ -1137,6 +1138,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	local_irq_save(flags);
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 	local_irq_restore(flags);
 
@@ -1204,6 +1206,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 	local_irq_restore(flags);
 
@@ -4147,6 +4150,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
+		size_counters_trace(true, gfp_flags, order, res.val);
 		put_cpu();
 	}
 

@@ -75,32 +75,36 @@ void size_counters_trace(bool alloc, gfp_t flags, int order, size_t pfn)
 {
 	if (size_counters_active && allocations) {
 		int kind = kind_from_flags(alloc, flags);
-		long idx = atomic_long_inc_return(&allocations_idx);
+		long idx = atomic_long_fetch_inc(&allocations_idx);
 		BUG_ON(idx >= ALLOCATION_LEN || pfn >= (1 << 24));
 		allocations[idx] = (kind << 30) | (order << 24) |
 				   (pfn & 0xFFFFFF);
 	}
 }
 
-#define _check_ret(ret)                                        \
-	({                                                     \
-		int __ret = ret;                               \
-		if (__ret < 0) {                               \
-			pr_err("Error reading size_counters"); \
-			return -ENOMEM;                        \
-		}                                              \
-		__ret;                                         \
+#define _check_ret(ret)                                          \
+	({                                                       \
+		int __ret = ret;                                 \
+		if (__ret < 0) {                                 \
+			pr_err("Error reading size_counters\n"); \
+			return -ENOMEM;                          \
+		}                                                \
+		__ret;                                           \
 	});
 
 static ssize_t sc_trace_read(struct file *file, struct kobject *kobj,
 			     struct bin_attribute *bin_attr, char *buf,
 			     loff_t off, size_t len)
 {
-	pr_info("read trace %lld %zu of %zu", off, len, bin_attr->size);
+	pr_info("read trace %lld %zu of %zu\n", off, len, bin_attr->size);
+	if (off > bin_attr->size)
+		return 0;
+
+	size_t to_copy = min(bin_attr->size - (size_t)off, PAGE_SIZE);
 
 	if (allocations != NULL)
-		memcpy(buf, allocations + off, len);
-	return bin_attr->size - min(bin_attr->size, (size_t)off);
+		memcpy(buf, allocations + off, to_copy);
+	return to_copy;
 }
 
 static struct bin_attribute bin_attr_sc_trace = {
@@ -147,21 +151,21 @@ ssize_t size_counters_store(struct kobject *kobj, struct kobj_attribute *attr,
 			    const char *buf, size_t count)
 {
 	if (buf == NULL || count == 0) {
-		pr_err("Invalid input");
+		pr_err("Invalid input\n");
 		return -EINVAL;
 	}
 
 	if (*buf == '0') {
-		pr_info("end");
+		pr_info("end\n");
 		size_counters_active = false;
 		if (allocations != NULL) {
 			long len = atomic_long_read(&allocations_idx);
-			pr_warn("trace end: %ld", len);
+			pr_warn("trace end: %ld\n", len);
 			bin_attr_sc_trace.size = len * sizeof(u32);
 		}
 		return count;
 	} else if (*buf == '1' || *buf == '2') {
-		pr_info("start");
+		pr_info("start\n");
 		if (allocations != NULL)
 			kvfree(allocations);
 
@@ -169,7 +173,7 @@ ssize_t size_counters_store(struct kobject *kobj, struct kobj_attribute *attr,
 		if (*buf == '1') {
 			allocations = NULL;
 		} else {
-			pr_info("start trace");
+			pr_info("start trace\n");
 			allocations = kvmalloc(ALLOCATION_LEN * sizeof(u32),
 					       GFP_KERNEL);
 		}
@@ -194,7 +198,7 @@ ssize_t size_counters_store(struct kobject *kobj, struct kobj_attribute *attr,
 		return count;
 	}
 
-	pr_err("Invalid input");
+	pr_err("Invalid input\n");
 	return -EINVAL;
 }
 
@@ -215,7 +219,7 @@ static struct kobject *size_counters_obj;
 static int __init size_counters_init(void)
 {
 	int retval;
-	pr_info("Initializing size_counters obj");
+	pr_info("Initializing size_counters obj\n");
 
 	size_counters_obj = kobject_create_and_add(KBUILD_MODNAME, kernel_kobj);
 	if (!size_counters_obj) {

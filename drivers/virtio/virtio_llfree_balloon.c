@@ -18,11 +18,14 @@
 #include <linux/mm.h>
 #include <linux/page_reporting.h>
 #include <linux/vmscan.h>
+#include <linux/delay.h>
+#include <linux/drop_caches.h>
 #include "llfree_qemu.h"
 
 /*-----------------------------------------------------------------------------------------------
 | Defines
 -------------------------------------------------------------------------------------------------*/
+#define DROP_PAGECACHE_DELAY 20
 
 /*-----------------------------------------------------------------------------------------------
 | Macros
@@ -74,6 +77,7 @@ struct virtio_llfree_balloon {
 	struct virtqueue *llfree_request_vq;
 	struct virtqueue **llfree_auto_deflate_vqs;
 	struct work_struct shrink_pagecache_work;
+	struct task_struct *drop_pagecache_thread;
 	struct llfree_vq_buffer vq_buffer;
 	LLFreeBalloonRequest guest_req;
 	AutoDeflateInfo *auto_deflate_info;
@@ -287,6 +291,16 @@ static void shrink_pagecache_func(struct work_struct *work)
 	// the pagecache
 	virtio_llfree_send_request(vb, SCHEDULE_LLFREE_BALLOON_UPDATE);
 }
+
+static int drop_pagecache_thread(void *arg)
+{
+	while (true) {
+		drop_pagecache();
+		ssleep(DROP_PAGECACHE_DELAY);
+	}
+
+	return 0;
+}
 #endif
 
 /*-----------------------------------------------------------------------------------------------
@@ -442,6 +456,15 @@ static int virtio_llfree_balloon_probe(struct virtio_device *vdev)
 
 	// directly send our zone info to our virtio-device
 	virtio_llfree_send_llfree_info(vb);
+
+	// optionally, start our pagecache drop thread
+	if (FEATURE_IS_ENABLED(
+		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE) &&
+	    FEATURE_IS_ENABLED(vdev, VIRTIO_LLFREE_BALLOON_F_AUTO_MODE)) {
+		vb->drop_pagecache_thread = kthread_run(
+			drop_pagecache_thread, NULL, "drop-pagecache-thread");
+	}
+
 	return 0;
 
 out_free_vb:
@@ -460,12 +483,15 @@ static void remove_common(struct virtio_llfree_balloon *vb)
 static void virtio_llfree_remove(struct virtio_device *vdev)
 {
 	struct virtio_llfree_balloon *vb = vdev->priv;
+	kthread_stop(vb->drop_pagecache_thread);
+
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	if (FEATURE_IS_ENABLED(
 		    vdev, VIRTIO_LLFREE_BALLOON_F_GUEST_TRIGGERED_DEFLATE)) {
 		kfree(vb->llfree_auto_deflate_vqs);
 	}
 #endif
+
 	kfree(vb->auto_deflate_info);
 	kfree(vb->vq_buffer.buf);
 	remove_common(vb);
@@ -475,6 +501,7 @@ static void virtio_llfree_remove(struct virtio_device *vdev)
 static unsigned int features[] = {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
 	VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE,
+	VIRTIO_LLFREE_BALLOON_F_AUTO_MODE,
 #endif
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	VIRTIO_LLFREE_BALLOON_F_GUEST_TRIGGERED_DEFLATE,

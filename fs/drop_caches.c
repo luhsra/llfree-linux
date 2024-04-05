@@ -10,6 +10,7 @@
 #include <linux/writeback.h>
 #include <linux/sysctl.h>
 #include <linux/gfp.h>
+#include <linux/drop_caches.h>
 #include "internal.h"
 
 /* A global variable is a bit ugly, but it keeps the code simple */
@@ -74,4 +75,8 @@ int drop_caches_sysctl_handler(struct ctl_table *table, int write,
 		stfu |= sysctl_drop_caches & 4;
 	}
 	return 0;
+}
+
+void drop_pagecache(void) {
+		iterate_supers(drop_pagecache_sb, NULL);
 }

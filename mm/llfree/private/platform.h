@@ -94,6 +94,18 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 					  (order_success), (order_failure)); \
 	})
 
+#define __c11_atomic_compare_exchange_weak(obj, expected, desired,           \
+					   order_success, order_failure)     \
+	__extension__({                                                      \
+		__auto_type __atomic_compare_exchange_ptr = (obj);           \
+		__typeof__((void)0, *__atomic_compare_exchange_ptr)          \
+			__atomic_compare_exchange_tmp = (desired);           \
+		__atomic_compare_exchange(__atomic_compare_exchange_ptr,     \
+					  (expected),                        \
+					  &__atomic_compare_exchange_tmp, 1, \
+					  (order_success), (order_failure)); \
+	})
+
 #define __c11_atomic_load(obj, order)                                          \
 	__extension__({                                                        \
 		__auto_type __atomic_load_ptr = (obj);                         \
@@ -111,17 +123,15 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 			       (order));                                      \
 	})
 
-#define __c11_atomic_compare_exchange_weak(obj, expected, desired,           \
-					   order_success, order_failure)     \
-	__extension__({                                                      \
-		__auto_type __atomic_compare_exchange_ptr = (obj);           \
-		__typeof__((void)0, *__atomic_compare_exchange_ptr)          \
-			__atomic_compare_exchange_tmp = (desired);           \
-		__atomic_compare_exchange(__atomic_compare_exchange_ptr,     \
-					  (expected),                        \
-					  &__atomic_compare_exchange_tmp, 1, \
-					  (order_success), (order_failure)); \
-	})
+#define __c11_atomic_exchange(obj, val, order)                                \
+	__extension__({                                                       \
+		__auto_type __atomic_exchange_ptr = (obj);                    \
+		__typeof__((void)0, *__atomic_exchange_ptr) __atomic_exchange_tmp = \
+			(val);                                                \
+		__atomic_exchange(__atomic_exchange_ptr, &__atomic_exchange_tmp, \
+				   &__atomic_exchange_tmp, (order));            \
+		__atomic_exchange_tmp;                                        \
+	}
 
 #endif
 
@@ -168,10 +178,10 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 		__c11_atomic_store(obj, val, ATOM_STORE_ORDER); \
 	})
 
-#define atom_and(obj, mask)                                           \
-	({                                                            \
-		llfree_debug("and");                                  \
-		__c11_atomic_fetch_and(obj, mask, ATOM_UPDATE_ORDER); \
+#define atom_swap(obj, desired)                                        \
+	({                                                             \
+		llfree_debug("swap");                                   \
+		__c11_atomic_exchange(obj, desired, ATOM_UPDATE_ORDER); \
 	})
 
 /// Atomic fetch-modify-update macro.

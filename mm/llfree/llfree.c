@@ -27,6 +27,7 @@ void noinline llfree_panic(void)
 llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
+	cores = 1; // only one core for now
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
@@ -74,6 +75,11 @@ static void frag_stop(struct seq_file *m, void *arg)
 {
 }
 
+static void writer(void *arg, char *str)
+{
+	seq_printf((struct seq_file *)arg, "%s", str);
+}
+
 static int llfree_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
@@ -82,28 +88,11 @@ static int llfree_show(struct seq_file *m, void *arg)
 
 	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
 		llfree_t *llfree = zone->llfree;
-		size_t free_trees = 0;
 
-		if (!populated_zone(zone))
+		if (!populated_zone(zone) || llfree == NULL)
 			continue;
 
-		for (size_t i = 0; i < llfree->trees_len; i++) {
-			tree_t t = atom_load(&llfree->trees[i]);
-			if (t.free == LLFREE_TREE_SIZE)
-				free_trees++;
-		}
-
-		preempt_disable();
-		seq_printf(m,
-			   "LLC { cores: %" PRIuS ", frames: %" PRIuS "/%" PRIuS
-			   ", huge: %" PRIuS "/%" PRIuS ", trees: %" PRIuS
-			   "/%" PRIuS " }\n",
-			   llfree->cores, llfree_free_frames(llfree),
-			   llfree->lower.frames,
-			   lower_free_huge(&llfree->lower),
-			   div_ceil(llfree->lower.frames, LLFREE_CHILD_SIZE),
-			   free_trees, llfree->trees_len);
-		preempt_enable();
+		llfree_print_debug(llfree, writer, m);
 	}
 	return 0;
 }

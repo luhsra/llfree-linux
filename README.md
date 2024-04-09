@@ -1,12 +1,8 @@
-# HyperAlloc: Linux
+# LLZero: Linux
 
-This repository contains a Linux 6.1 with integrated [LLFree](https://github.com/luhsra/llfree-linux) and HyperAlloc.
+This repository contains a Linux 6.1 with integrated [LLFree](https://github.com/luhsra/llfree-c) and Zeroing.
 
-- See: https://github.com/luhsra/hyperalloc-bench
-
-## Publication
-
-HyperAlloc: Efficient VM Memory De/Inflation via Hypervisor-Shared Page-Frame Allocators Lars Wrenger, Kenny Albes, Marco Wurps, Christian Dietrich, Daniel Lohmann In: Proceedings of the 20th European Conference on Computer Systems (EuroSys 2025); ACM
+- See: https://scm.sra.uni-hannover.de/research/llfree/llzero-bench
 
 ## Build
 
@@ -16,10 +12,10 @@ Download the llfree submodule.
 git submodule update --init
 ```
 
-Either use one of the provided configs under `build-*/.config` or enable the `CONFIG_LLFREE` option for LLFree `CONFIG_VIRTIO_LLFREE_BALLOON` for HyperAlloc (`make LLVM=1 menuconfig`).
+Either use one of the provided configs under `build-*/.config` or enable the `CONFIG_LLFREE` option for LLFree `CONFIG_VIRTIO_LLFREE_BALLOON` for HyperAlloc (`make LLVM=1 menuconfig`) and `CONFIG_LLZERO` for zeroing.
 
 ```sh
-make O=build-llfree-vm LLVM=1 #...
+make O=build-llfree-vm LLVM=1
 ```
 
 The paper uses the following configs:

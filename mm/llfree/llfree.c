@@ -39,13 +39,13 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
 	llfree_meta_size_t m = llfree_metadata_size(cores, pages);
-	u8 *primary = memblock_alloc_node(m.primary, LLFREE_CACHE_SIZE, node);
-	u8 *secondary =
-		memblock_alloc_node(m.secondary, LLFREE_CACHE_SIZE, node);
-	BUG_ON(primary == NULL || secondary == NULL);
-
-	llfree_result_t res = llfree_init(self, cores, pages, LLFREE_INIT_ALLOC,
-					  primary, secondary);
+	llfree_meta_t meta = {
+		.local = memblock_alloc_node(m.local, LLFREE_CACHE_SIZE, node),
+		.trees = memblock_alloc_node(m.trees, LLFREE_CACHE_SIZE, node),
+		.lower = memblock_alloc_node(m.lower, LLFREE_CACHE_SIZE, node),
+	};
+	llfree_result_t res =
+		llfree_init(self, cores, pages, LLFREE_INIT_ALLOC, meta);
 
 	BUG_ON(!llfree_ok(res));
 

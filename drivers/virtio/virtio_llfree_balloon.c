@@ -37,7 +37,7 @@
 | Shared Structs and Enums
 -------------------------------------------------------------------------------------------------*/
 enum llfree_zone_type {
-	LLFREE_NON_EXISTING,
+	LLFREE_NONE_EXISTING,
 	LLFREE_ZONE_DMA,
 	LLFREE_ZONE_DMA32,
 	LLFREE_ZONE_NORMAL,
@@ -102,7 +102,7 @@ static void noinline
 virtio_llfree_init_map_zone_types(enum llfree_zone_type *map_zone_type)
 {
 	for (uint32_t i = 0; i < LLFREE_MAX_NR_ZONES; i++) {
-		map_zone_type[i] = LLFREE_NON_EXISTING;
+		map_zone_type[i] = LLFREE_NONE_EXISTING;
 	}
 
 #ifdef CONFIG_ZONE_DMA
@@ -146,10 +146,11 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 			continue;
 		}
 
-		vb->qemu_info.zone_type = vb->map_zone_type[i];
-		vb->qemu_info.zone_start_pfn = zone->zone_start_pfn;
+		vb->qemu_info.type = vb->map_zone_type[i];
+		vb->qemu_info.start_pfn = zone->zone_start_pfn;
+		vb->qemu_info.pages = zone->spanned_pages;
 		vb->qemu_info.numa_node_id = pgdat->node_id;
-		vb->qemu_info.qemu_llfree = (llfree_t *)zone->llfree;
+		vb->qemu_info.llfree_meta = llfree_metadata((llfree_t *)zone->llfree);
 		vb->qemu_info.zone_free_pages =
 			(_Atomic(int64_t) *)&zone->vm_stat[NR_FREE_PAGES];
 		vb->qemu_info.zone_llfree_huge_page_counter =

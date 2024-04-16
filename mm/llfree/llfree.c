@@ -28,6 +28,7 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
 	cores = 1; // only one core for now
+
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
@@ -38,13 +39,13 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
 	llfree_meta_size_t m = llfree_metadata_size(cores, pages);
-	u8 *primary = memblock_alloc_node(m.primary, LLFREE_CACHE_SIZE, node);
-	u8 *secondary =
-		memblock_alloc_node(m.secondary, LLFREE_CACHE_SIZE, node);
-	BUG_ON(primary == NULL || secondary == NULL);
-
-	llfree_result_t res = llfree_init(self, cores, pages, LLFREE_INIT_ALLOC,
-					  primary, secondary);
+	llfree_meta_t meta = {
+		.local = memblock_alloc_node(m.local, LLFREE_CACHE_SIZE, node),
+		.trees = memblock_alloc_node(m.trees, LLFREE_CACHE_SIZE, node),
+		.lower = memblock_alloc_node(m.lower, LLFREE_CACHE_SIZE, node),
+	};
+	llfree_result_t res =
+		llfree_init(self, cores, pages, LLFREE_INIT_ALLOC, meta);
 
 	BUG_ON(!llfree_ok(res));
 
@@ -143,7 +144,7 @@ static int __init llfree_init_module(void)
 }
 module_init(llfree_init_module);
 
-#if IS_ENABLED(CONFIG_DEV_DAX)
+#if 0
 struct device *device_dax_driver_find_device_by_devt(dev_t devt);
 
 static __init int find_dax_init(void)

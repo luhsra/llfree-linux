@@ -2053,6 +2053,24 @@ static int kvm_vm_ioctl_set_memory_region(struct kvm *kvm,
 static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
+#if 1
+	long ret;
+
+	if (!atomic_read(&kvm->online_vcpus))
+		return -EINVAL;
+	/* Sanity check */
+	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
+	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) || !map_region->nr_pages ||
+	    map_region->nr_pages & GENMASK_ULL(63, 63 - PAGE_SHIFT) ||
+	    map_region->gpa + (map_region->nr_pages << PAGE_SHIFT) <=
+		    map_region->gpa) {
+		return -EINVAL;
+	}
+	// TODO: Does pinning and faulting trigger kvm handling?
+	ret = get_user_pages_unlocked(map_region->source_addr,
+				      map_region->nr_pages, NULL, 0);
+	return ret < 0 ? ret : 0;
+#else
 	struct kvm_vcpu *vcpu;
 	u64 error_code;
 	u64 nr_pages_iter;
@@ -2111,6 +2129,7 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 
 	return 0;
+#endif
 }
 
 #ifndef CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT

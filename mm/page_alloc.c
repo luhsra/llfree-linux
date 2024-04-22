@@ -88,7 +88,7 @@
 #include "page_reporting.h"
 #include "swap.h"
 
-extern void noinline virtio_llfree_auto_deflate(struct zone * zone);
+extern void noinline virtio_llfree_auto_deflate(struct zone * zone, uint64_t frame);
 
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -1112,8 +1112,8 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1139,8 +1139,8 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1204,8 +1204,8 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -3363,7 +3363,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		cpu = get_cpu();
 		ret = llfree_drain(zone->llfree, cpu);
 		put_cpu();
-		BUG_ON(!llfree_ok(ret));
+		BUG_ON(!llfree_is_ok(ret));
 	}
 #endif
 }
@@ -3396,7 +3396,7 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		ret = llfree_drain(zone->llfree, cpu);
 		put_cpu();
 		local_irq_restore(flags);
-		BUG_ON(!llfree_ok(ret));
+		BUG_ON(!llfree_is_ok(ret));
 	}
 #endif
 }
@@ -4122,34 +4122,29 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 
 	cpu = get_cpu();
 
-#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 	res = llfree_get(zone->llfree, cpu, llf);
-
-	// check again due to huge page fragmentation...
-	if ((res.val == LLFREE_ERR_MEMORY) &&
-	    (zone_page_state(zone, NR_INFLATED_HUGE_PAGES) > 0)) {
-		virtio_llfree_auto_deflate(zone);
-		res = llfree_get(zone->llfree, cpu, llf);
-	}
-#else
-	res = llfree_get(zone->llfree, cpu, llf);
-#endif
-
-	if (!llfree_ok(res)) {
+	if (!llfree_is_ok(res)) {
 		put_cpu();
 		// pr_err("llfree thread %u: error %lld", current->pid, res.val);
 		// pr_err("nr_free_pages left in zone: %li",
 		//        atomic_long_read(&zone->vm_stat[NR_FREE_PAGES]));
-		BUG_ON(res.val != LLFREE_ERR_MEMORY);
+		BUG_ON(res.error != LLFREE_ERR_MEMORY);
 	} else {
-		size_t offset;
+		size_t offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		page = pfn_to_page(offset + res.frame);
 
-		offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
-		page = pfn_to_page(offset + res.val);
+		if (res.inflated) {
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
+			virtio_llfree_auto_deflate(zone, res.frame);
+#else
+			VM_BUG_ON_PAGE(true, page) // No auto deflation!
+#endif
+		}
+
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
-		size_counters_trace(true, gfp_flags, order, res.val);
+		size_counters_trace(true, gfp_flags, order, offset + res.frame);
 		put_cpu();
 	}
 
@@ -4545,16 +4540,6 @@ retry:
 				goto retry;
 			}
 		}
-
-#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-		// this check is for 4KiB pages
-		mark = high_wmark_pages(zone);
-		if (!zone_watermark_ok(zone, order, mark, ac->highest_zoneidx,
-				       alloc_flags) &&
-		    (zone_page_state(zone, NR_INFLATED_HUGE_PAGES) > 0)) {
-			virtio_llfree_auto_deflate(zone);
-		}
-#endif
 
 		mark = wmark_pages(zone, alloc_flags & ALLOC_WMARK_MASK);
 		if (!zone_watermark_fast(zone, order, mark, ac->highest_zoneidx,

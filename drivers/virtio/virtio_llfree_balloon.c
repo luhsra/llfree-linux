@@ -152,8 +152,7 @@ virtio_llfree_send_llfree_info(struct virtio_llfree_balloon *vb)
 		vb->qemu_info.start_pfn = zone->zone_start_pfn;
 		vb->qemu_info.pages = zone->spanned_pages;
 		vb->qemu_info.numa_node_id = pgdat->node_id;
-		vb->qemu_info.llfree_meta =
-			llfree_metadata((llfree_t *)zone->llfree);
+		vb->qemu_info.llfree_meta = llfree_metadata(zone->llfree);
 		vb->qemu_info.zone_free_pages =
 			(_Atomic(int64_t) *)&zone->vm_stat[NR_FREE_PAGES];
 		vb->qemu_info.zone_llfree_huge_page_counter =
@@ -220,13 +219,8 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone, uint64_t frame)
 
 	spin_lock_irqsave(&zone->auto_deflate_lock, flags);
 	// skip if already inflated (might happen on parallel alloc)
-	if (!llfree_is_inflated((llfree_t *)&zone->llfree, frame)) {
-		size_t offset =
-			ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
-		uint64_t pfn = offset + frame;
-		pr_warn("llfree deflate skipped: %llu", pfn);
+	if (!llfree_is_inflated(zone->llfree, frame))
 		goto out;
-	}
 
 	// are core ids always continuous?
 	num_cores = num_online_cpus();

@@ -611,6 +611,10 @@ struct per_cpu_nodestat {
 
 #endif /* !__GENERATING_BOUNDS.H */
 
+#ifdef CONFIG_LLFREE
+struct llfree_t;
+#endif
+
 enum zone_type {
 	/*
 	 * ZONE_DMA and ZONE_DMA32 are used when there are peripherals not able
@@ -733,7 +737,7 @@ struct zone {
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 #ifdef CONFIG_LLFREE
-	void *llfree;
+	struct llfree *llfree;
 #endif
 	/*
 	 * the high and batch values are copied to individual pagesets for

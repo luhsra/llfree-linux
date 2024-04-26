@@ -2053,34 +2053,17 @@ static int kvm_vm_ioctl_set_memory_region(struct kvm *kvm,
 static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 					  struct kvm_map_region *map_region)
 {
-#if 1
 	long ret;
-
-	if (!atomic_read(&kvm->online_vcpus))
-		return -EINVAL;
-	/* Sanity check */
-	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
-	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) || !map_region->nr_pages ||
-	    map_region->nr_pages & GENMASK_ULL(63, 63 - PAGE_SHIFT) ||
-	    map_region->gpa + (map_region->nr_pages << PAGE_SHIFT) <=
-		    map_region->gpa) {
-		return -EINVAL;
-	}
-	// TODO: Does pinning and faulting trigger kvm handling?
-	ret = get_user_pages_unlocked(map_region->source_addr,
-				      map_region->nr_pages, NULL, 0);
-	return ret < 0 ? ret : 0;
-#else
 	struct kvm_vcpu *vcpu;
 	u64 error_code;
 	u64 nr_pages_iter;
 	u64 gpa_iter;
 	u32 goal_level;
-	int idx, ret;
+	int idx;
 
-	if (!atomic_read(&kvm->online_vcpus))
+	// Map into qemu process
+	if (atomic_read(&kvm->online_vcpus) == 0)
 		return -EINVAL;
-
 	/* Sanity check */
 	if (!IS_ALIGNED(map_region->source_addr, PAGE_SIZE) ||
 	    !IS_ALIGNED(map_region->gpa, PAGE_SIZE) || !map_region->nr_pages ||
@@ -2089,7 +2072,12 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 		    map_region->gpa) {
 		return -EINVAL;
 	}
+	// Does pinning and faulting trigger NPF? -> Nope
+	ret = get_user_pages_unlocked(map_region->source_addr,
+				      map_region->nr_pages, NULL, FOLL_WRITE);
 
+
+	// Map into nested page tables
 	vcpu = kvm_get_vcpu(kvm, 0);
 	idx = srcu_read_lock(&kvm->srcu);
 	kvm_mmu_reload(vcpu);
@@ -2106,9 +2094,11 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 			cond_resched();
 
 		/* TODO: large page support. */
-		error_code = PFERR_WRITE_MASK;
+		error_code = PFERR_NESTED_GUEST_PAGE;
 
 		for (uint32_t i = 0; i < KVM_MAP_RETRIES; i++) {
+			// kvm_mmu_page_fault(vcpu, gpa_iter, error_code, NULL, 0);
+
 			ret = kvm_mmu_map_page(vcpu, gpa_iter, error_code,
 					       PG_LEVEL_2M, &goal_level);
 			if (ret != -EAGAIN) {
@@ -2129,7 +2119,6 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 
 	return 0;
-#endif
 }
 
 #ifndef CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT

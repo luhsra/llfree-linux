@@ -4137,7 +4137,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
 			virtio_llfree_auto_deflate(zone, res.frame);
 #else
-			VM_BUG_ON_PAGE(true, page) // No auto deflation!
+			VM_BUG_ON_PAGE(true, page); // No auto deflation!
 #endif
 		}
 

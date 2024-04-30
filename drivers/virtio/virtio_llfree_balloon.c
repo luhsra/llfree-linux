@@ -232,8 +232,11 @@ void noinline virtio_llfree_auto_deflate(struct zone *zone, uint64_t frame)
 		goto out;
 	}
 
-	// printk("auto-deflate: core %u zone %u threadid %u\n", core, zone_type,
-	//        current->pid);
+	// pr_warn("deflate frame=%x addr=0x%x\n", frame,
+	// 	page_to_phys(pfn_to_page(
+	// 		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER) +
+	// 		frame)));
+
 	vb_llfree->auto_deflate_info[core].numa_node_id = numa_node_id;
 	vb_llfree->auto_deflate_info[core].zone_type =
 		vb_llfree->map_zone_type[zone_type];

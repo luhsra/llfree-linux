@@ -7408,12 +7408,6 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 	if (!cpuset_zone_allowed(zone, gfp_flags))
 		return;
 
-  #ifdef CONFIG_VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-  // if (inflated_zone(zone)) {
-  //   printk(KERN_WARNING "but return early because zone is inflated\n");
-  //   return;
-  // }
-  #endif
 	pgdat = zone->zone_pgdat;
 	curr_idx = READ_ONCE(pgdat->kswapd_highest_zoneidx);
 
@@ -7486,7 +7480,7 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 }
 #endif /* CONFIG_HIBERNATION */
 
-#ifdef CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
+#ifdef CONFIG_VIRTIO_LLFREE_BALLOON
 unsigned long shrink_pagecache_for_reclaim(uint32_t num_numa_node, uint32_t nr_to_reclaim)
 {
 	struct scan_control sc = {
@@ -7516,7 +7510,7 @@ unsigned long shrink_pagecache_for_reclaim(uint32_t num_numa_node, uint32_t nr_t
 	return nr_reclaimed;
 }
 EXPORT_SYMBOL(shrink_pagecache_for_reclaim);
-#endif /* CONFIG_VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE */
+#endif /* CONFIG_VIRTIO_LLFREE_BALLOON */
 
 /*
  * This kswapd start function will be called by init and node-hot-add.

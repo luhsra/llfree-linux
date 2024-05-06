@@ -2075,7 +2075,8 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 	// Does pinning and faulting trigger NPF? -> Nope
 	ret = get_user_pages_unlocked(map_region->source_addr,
 				      map_region->nr_pages, NULL, FOLL_WRITE);
-
+	if (ret < 0)
+		pr_err("%s: user map failed %ld\n", __func__, ret);
 
 	// Map into nested page tables
 	vcpu = kvm_get_vcpu(kvm, 0);
@@ -2106,9 +2107,8 @@ static int kvm_vm_ioctl_map_memory_region(struct kvm *kvm,
 			}
 		}
 
-		if (ret) {
-			printk("kvm_vm_ioctl_map_memory_region: early break, return value %d\n",
-			       ret);
+		if (ret < 0) {
+			pr_err("%s: kvm map failed %ld\n", __func__, ret);
 			break;
 		}
 

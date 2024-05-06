@@ -134,28 +134,6 @@ config VIRTIO_LLFREE_BALLOON
 	 This driver supports increasing and decreasing the amount
 	 of memory within a KVM guest, blazingly fast.
 
-config VIRTIO_LLFREE_BALLOON_DEMAND_SHRINK_PAGECACHE
-	tristate "allow llfree-balloon to shrink pagecache on demand"
-	depends on VIRTIO_LLFREE_BALLOON
-	depends on VIRTIO
-	depends on LLFREE
-	select MEMORY_BALLOON
-	help
-	  Allows the llfree balloon virtio device to shrink the guest
-	  kernels pagecache on demand. Depends on enabled feature in 
-	  virtio llfree balloon.
-
-config VIRTIO_LLFREE_BALLOON_AUTO_DEFLATE
-	tristate "try to auto-deflate llfree-balloon, when memory is low"
-	depends on VIRTIO_LLFREE_BALLOON
-	depends on VIRTIO
-	depends on LLFREE
-	select MEMORY_BALLOON
-	help
-	  Asks the llfree balloon virtio device to deflate memory, when a
-	  watermark for a memory zone is reached. Depends on enabled feature
-	  in virtio llfree balloon.
-
 config VIRTIO_MEM
 	tristate "Virtio mem driver"
 	depends on X86_64 || ARM64

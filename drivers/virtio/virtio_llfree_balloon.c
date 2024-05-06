@@ -21,7 +21,6 @@
 #include <linux/vmscan.h>
 #include <linux/delay.h>
 #include <linux/drop_caches.h>
-#include "llfree_qemu.h"
 
 /*-----------------------------------------------------------------------------------------------
 | Defines
@@ -58,6 +57,16 @@ struct ll_vq_buffer {
 	size_t len;
 };
 
+typedef struct ll_zone_info {
+	llfree_meta_t llfree_meta;
+	uint32_t start_pfn;
+	uint32_t pages;
+	uint32_t type;
+	uint32_t node;
+	_Atomic(int64_t) *free_pages;
+	_Atomic(int64_t) *file_pages;
+} ll_zone_info_t;
+
 struct ll_balloon {
 	struct virtio_device *vdev;
 	struct virtqueue *info_vq;
@@ -68,7 +77,6 @@ struct ll_balloon {
 	struct ll_vq_buffer vq_buffer;
 	ll_request_t guest_req;
 	deflate_info_t *deflate_info;
-	ll_zone_info_t qemu_info;
 	enum ll_zone_type map_zone_type[LLFREE_ZONE_LEN];
 };
 
@@ -111,11 +119,40 @@ static inline int32_t zone_get_type(struct zone *zone)
 	return -1;
 }
 
+void noinline llfree_copy_into_buffer(ll_zone_info_t *llfree_info, void *buffer)
+{
+	ll_zone_info_t *dest;
+	if (!buffer) {
+		pr_err("llfree_copy_into_buffer: buffer is null pointer\n");
+		return;
+	}
+
+	dest = (ll_zone_info_t *)buffer;
+	dest->start_pfn = llfree_info->start_pfn;
+	dest->pages = llfree_info->pages;
+	dest->type = llfree_info->type;
+	dest->node = llfree_info->node;
+
+	// translating gva to gpa
+	dest->llfree_meta.local =
+		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.local);
+	dest->llfree_meta.trees =
+		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.trees);
+	dest->llfree_meta.lower =
+		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.lower);
+
+	dest->free_pages =
+		(_Atomic(int64_t) *)virt_to_phys(llfree_info->free_pages);
+	dest->file_pages =
+		(_Atomic(int64_t) *)virt_to_phys(llfree_info->file_pages);
+}
+
 /*-----------------------------------------------------------------------------------------------
 | Virtqueue Sending Functions
 -------------------------------------------------------------------------------------------------*/
 static void noinline ll_send_info(struct ll_balloon *vb)
 {
+	ll_zone_info_t zone_info;
 	// only UMA is currently supported
 	struct pglist_data *pgdat = first_online_pgdat();
 
@@ -128,20 +165,17 @@ static void noinline ll_send_info(struct ll_balloon *vb)
 			continue;
 		}
 
-		vb->qemu_info.type = vb->map_zone_type[i];
-		vb->qemu_info.start_pfn = zone->zone_start_pfn;
-		vb->qemu_info.pages = zone->spanned_pages;
-		vb->qemu_info.node_id = pgdat->node_id;
-		vb->qemu_info.llfree_meta = llfree_metadata(zone->llfree);
-		vb->qemu_info.free_pages =
+		zone_info.type = vb->map_zone_type[i];
+		zone_info.start_pfn = zone->zone_start_pfn;
+		zone_info.pages = zone->spanned_pages;
+		zone_info.node = pgdat->node_id;
+		zone_info.llfree_meta = llfree_metadata(zone->llfree);
+		zone_info.free_pages =
 			(_Atomic(int64_t) *)&zone->vm_stat[NR_FREE_PAGES];
-		vb->qemu_info.reclaimed_huge =
-			(_Atomic(int64_t) *)&zone
-				->vm_stat[NR_INFLATED_HUGE_PAGES];
-		vb->qemu_info.file_pages = (_Atomic(int64_t) *)&zone->zone_pgdat
-						   ->vm_stat[NR_FILE_PAGES];
+		zone_info.file_pages = (_Atomic(int64_t) *)&zone->zone_pgdat
+					       ->vm_stat[NR_FILE_PAGES];
 
-		llfree_copy_into_buffer(&vb->qemu_info, vb->vq_buffer.buf);
+		llfree_copy_into_buffer(&zone_info, vb->vq_buffer.buf);
 
 		sg_init_one(&sg, vb->vq_buffer.buf, vb->vq_buffer.len);
 		virtqueue_add_outbuf(vb->info_vq, &sg, 1, vb, GFP_KERNEL);
@@ -177,7 +211,7 @@ static void noinline ll_send_request(struct ll_balloon *vb,
 		cpu_relax();
 }
 
-void noinline ll_auto_deflate(struct zone *zone, uint64_t frame)
+void noinline ll_request_mapping(struct zone *zone, uint64_t frame)
 {
 	struct scatterlist sg;
 	uint32_t core;
@@ -192,8 +226,8 @@ void noinline ll_auto_deflate(struct zone *zone, uint64_t frame)
 	}
 
 	spin_lock_irqsave(&zone->auto_deflate_lock, flags);
-	// skip if already inflated (might happen on parallel alloc)
-	if (!llfree_is_inflated(zone->llfree, frame))
+	// skip if already mapped (might happen on parallel alloc)
+	if (!llfree_is_unmapped(zone->llfree, frame))
 		goto out;
 
 	// are core ids always continuous?
@@ -232,7 +266,7 @@ void noinline ll_auto_deflate(struct zone *zone, uint64_t frame)
 out:
 	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
 }
-EXPORT_SYMBOL(ll_auto_deflate);
+EXPORT_SYMBOL(ll_request_mapping);
 
 /*-----------------------------------------------------------------------------------------------
 | Pagecache Shrinking Functions

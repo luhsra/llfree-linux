@@ -88,7 +88,7 @@
 #include "page_reporting.h"
 #include "swap.h"
 
-extern void noinline ll_auto_deflate(struct zone * zone, uint64_t frame);
+extern void noinline ll_request_mapping(struct zone * zone, uint64_t frame);
 
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -4133,9 +4133,9 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		size_t offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 		page = pfn_to_page(offset + res.frame);
 
-		if (res.inflated) {
+		if (res.unmapped) {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON
-			ll_auto_deflate(zone, res.frame);
+			ll_request_mapping(zone, res.frame);
 #else
 			VM_BUG_ON_PAGE(true, page); // No auto deflation!
 #endif

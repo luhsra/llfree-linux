@@ -2373,6 +2373,9 @@ retry:
 		rc = virtio_mem_unplug_pending_mb(vm);
 
 	if (!rc && vm->requested_size != vm->plugged_size) {
+		pr_info("virtio_mem_start %lld at %llu ns\n",
+			(s64)vm->requested_size - (s64)vm->plugged_size,
+			ktime_get_ns());
 		if (vm->requested_size > vm->plugged_size) {
 			diff = vm->requested_size - vm->plugged_size;
 			rc = virtio_mem_plug_request(vm, diff);
@@ -2380,6 +2383,7 @@ retry:
 			diff = vm->plugged_size - vm->requested_size;
 			rc = virtio_mem_unplug_request(vm, diff);
 		}
+		pr_info("virtio_mem_end %d at %llu ns\n", rc, ktime_get_ns());
 	}
 
 	switch (rc) {
@@ -2896,6 +2900,8 @@ static void virtio_mem_config_changed(struct virtio_device *vdev)
 
 	if (unlikely(vm->in_kdump))
 		return;
+
+	pr_info("virtio_mem_config at %llu ns\n", ktime_get_ns());
 
 	atomic_set(&vm->config_changed, 1);
 	virtio_mem_retry(vm);

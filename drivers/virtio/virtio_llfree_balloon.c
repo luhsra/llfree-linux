@@ -227,7 +227,7 @@ void noinline ll_request_mapping(struct zone *zone, uint64_t frame)
 
 	spin_lock_irqsave(&zone->auto_deflate_lock, flags);
 	// skip if already mapped (might happen on parallel alloc)
-	if (!llfree_is_unmapped(zone->llfree, frame))
+	if (!llfree_is_reclaimed(zone->llfree, frame))
 		goto out;
 
 	// are core ids always continuous?

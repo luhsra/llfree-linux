@@ -4133,7 +4133,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		size_t offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 		page = pfn_to_page(offset + res.frame);
 
-		if (res.unmapped) {
+		if (res.reclaimed) {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON
 			ll_request_mapping(zone, res.frame);
 #else

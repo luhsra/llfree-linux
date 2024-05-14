@@ -94,9 +94,9 @@ enum ll_balloon_vq {
 /*-----------------------------------------------------------------------------------------------
 | Helper Functions
 -------------------------------------------------------------------------------------------------*/
-static void noinline ll_init_zone_types(enum ll_zone_type *types)
+static void ll_init_zone_types(enum ll_zone_type *types)
 {
-	for (uint32_t i = 0; i < LLFREE_ZONE_LEN; i++) {
+	for (uint32_t i = 0; i < __MAX_NR_ZONES; i++) {
 		types[i] = LLFREE_ZONE_NONE;
 	}
 
@@ -119,7 +119,7 @@ static inline int32_t zone_get_type(struct zone *zone)
 	return -1;
 }
 
-void noinline llfree_copy_into_buffer(ll_zone_info_t *llfree_info, void *buffer)
+void llfree_copy_into_buffer(ll_zone_info_t *llfree_info, void *buffer)
 {
 	ll_zone_info_t *dest;
 	if (!buffer) {
@@ -150,7 +150,7 @@ void noinline llfree_copy_into_buffer(ll_zone_info_t *llfree_info, void *buffer)
 /*-----------------------------------------------------------------------------------------------
 | Virtqueue Sending Functions
 -------------------------------------------------------------------------------------------------*/
-static void noinline ll_send_info(struct ll_balloon *vb)
+static void ll_send_info(struct ll_balloon *vb)
 {
 	ll_zone_info_t zone_info;
 	// only UMA is currently supported
@@ -188,8 +188,7 @@ static void noinline ll_send_info(struct ll_balloon *vb)
 	}
 }
 
-static void noinline ll_send_request(struct ll_balloon *vb,
-				     ll_request_t request)
+static void ll_send_request(struct ll_balloon *vb, ll_request_t request)
 {
 	struct scatterlist sg;
 	uint32_t len;
@@ -211,13 +210,15 @@ static void noinline ll_send_request(struct ll_balloon *vb,
 		cpu_relax();
 }
 
-void noinline ll_request_mapping(struct zone *zone, uint64_t frame)
+// Assumes that preemption is already disabled!
+void ll_request_mapping(struct zone *zone, uint64_t frame, size_t core)
 {
 	struct scatterlist sg;
-	uint32_t core;
-	uint32_t num_cores;
 	uint32_t len;
 	unsigned long flags;
+
+	deflate_info_t *info = &vb_llfree->deflate_info[core];
+	struct virtqueue *vq = vb_llfree->deflate_vqs[core];
 
 	uint32_t zone_type = zone_get_type(zone);
 	if (zone_type == -1 || zone->llfree == NULL) {
@@ -225,46 +226,30 @@ void noinline ll_request_mapping(struct zone *zone, uint64_t frame)
 		return;
 	}
 
-	spin_lock_irqsave(&zone->auto_deflate_lock, flags);
+	local_irq_save(flags);
+
 	// skip if already mapped (might happen on parallel alloc)
 	if (!llfree_is_reclaimed(zone->llfree, frame))
 		goto out;
 
-	// are core ids always continuous?
-	num_cores = num_online_cpus();
-	core = raw_smp_processor_id();
-
-	if (core > num_cores) {
-		pr_warn("llfree_balloon: core > num_cores!\n");
-		goto out;
-	}
-
-	// pr_warn("deflate frame=%x addr=0x%x\n", frame,
-	// 	page_to_phys(pfn_to_page(
-	// 		ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER) +
-	// 		frame)));
-
-	vb_llfree->deflate_info[core].node = zone->node;
-	vb_llfree->deflate_info[core].zone =
-		vb_llfree->map_zone_type[zone_type];
-	vb_llfree->deflate_info[core].core = core;
-	vb_llfree->deflate_info[core].frame = frame;
-
 	// send information
-	sg_init_one(&sg, &vb_llfree->deflate_info[core],
-		    sizeof(deflate_info_t));
-	virtqueue_add_outbuf(vb_llfree->deflate_vqs[core], &sg, 1, vb_llfree,
-			     GFP_KERNEL);
-	virtqueue_kick(vb_llfree->deflate_vqs[core]);
+	*info = (deflate_info_t){
+		.node = zone->node,
+		.zone = vb_llfree->map_zone_type[zone_type],
+		.core = core,
+		.frame = frame,
+	};
+	sg_init_one(&sg, info, sizeof(deflate_info_t));
+	virtqueue_add_outbuf(vq, &sg, 1, vb_llfree, GFP_KERNEL);
+	virtqueue_kick(vq);
 
 	// we can't sleep in this context
 	// busy wait to sync with virtio-device
-	while (!virtqueue_get_buf(vb_llfree->deflate_vqs[core], &len) &&
-	       !virtqueue_is_broken(vb_llfree->deflate_vqs[core]))
+	while (!virtqueue_get_buf(vq, &len) && !virtqueue_is_broken(vq))
 		cpu_relax();
 
 out:
-	spin_unlock_irqrestore(&zone->auto_deflate_lock, flags);
+	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(ll_request_mapping);
 

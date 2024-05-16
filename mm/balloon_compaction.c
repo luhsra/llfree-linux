@@ -130,6 +130,15 @@ struct page *balloon_page_alloc(void)
 }
 EXPORT_SYMBOL_GPL(balloon_page_alloc);
 
+struct page *balloon_huge_page_alloc(void)
+{
+	struct page *page = alloc_pages(balloon_mapping_gfp_mask() |
+				       __GFP_NOMEMALLOC | __GFP_NORETRY |
+				       __GFP_NOWARN | __GFP_COMP, 9);
+	return page;
+}
+EXPORT_SYMBOL_GPL(balloon_huge_page_alloc);
+
 /*
  * balloon_page_enqueue - inserts a new page into the balloon page list.
  *

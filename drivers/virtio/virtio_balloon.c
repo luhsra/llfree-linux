@@ -132,7 +132,11 @@ static u32 page_to_balloon_pfn(struct page *page)
 
 	BUILD_BUG_ON(PAGE_SHIFT < VIRTIO_BALLOON_PFN_SHIFT);
 	/* Convert pfn from Linux page size to balloon page size. */
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+	return pfn * 1;
+#else
 	return pfn * VIRTIO_BALLOON_PAGES_PER_PAGE;
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 }
 
 static void balloon_ack(struct virtqueue *vq)
@@ -196,7 +200,11 @@ static void set_page_pfns(struct virtio_balloon *vb,
 	 * Set balloon pfns pointing at this page.
 	 * Note that the first pfn points at start of the page.
 	 */
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+	for (i = 0; i < 1; i++)
+#else
 	for (i = 0; i < VIRTIO_BALLOON_PAGES_PER_PAGE; i++)
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 		pfns[i] = cpu_to_virtio32(vb->vdev,
 					  page_to_balloon_pfn(page) + i);
 }
@@ -211,9 +219,14 @@ static unsigned int fill_balloon(struct virtio_balloon *vb, size_t num)
 	/* We can only do one array worth at a time. */
 	num = min(num, ARRAY_SIZE(vb->pfns));
 
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+	for (num_pfns = 0; num_pfns < num; num_pfns += 1) {
+		struct page *page = balloon_huge_page_alloc();
+#else
 	for (num_pfns = 0; num_pfns < num;
 	     num_pfns += VIRTIO_BALLOON_PAGES_PER_PAGE) {
 		struct page *page = balloon_page_alloc();
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 
 		if (!page) {
 			dev_info_ratelimited(&vb->vdev->dev,
@@ -235,11 +248,20 @@ static unsigned int fill_balloon(struct virtio_balloon *vb, size_t num)
 		balloon_page_enqueue(&vb->vb_dev_info, page);
 
 		set_page_pfns(vb, vb->pfns + vb->num_pfns, page);
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+		vb->num_pages += 1;
+#else
 		vb->num_pages += VIRTIO_BALLOON_PAGES_PER_PAGE;
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
+
 		if (!virtio_has_feature(vb->vdev,
 					VIRTIO_BALLOON_F_DEFLATE_ON_OOM))
 			adjust_managed_page_count(page, -1);
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+		vb->num_pfns += 1;
+#else
 		vb->num_pfns += VIRTIO_BALLOON_PAGES_PER_PAGE;
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 	}
 
 	num_allocated_pages = vb->num_pfns;
@@ -278,14 +300,22 @@ static unsigned int leak_balloon(struct virtio_balloon *vb, size_t num)
 	mutex_lock(&vb->balloon_lock);
 	/* We can't release more pages than taken */
 	num = min(num, (size_t)vb->num_pages);
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+	for (vb->num_pfns = 0; vb->num_pfns < num; vb->num_pfns += 1) {
+#else
 	for (vb->num_pfns = 0; vb->num_pfns < num;
 	     vb->num_pfns += VIRTIO_BALLOON_PAGES_PER_PAGE) {
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 		page = balloon_page_dequeue(vb_dev_info);
 		if (!page)
 			break;
 		set_page_pfns(vb, vb->pfns + vb->num_pfns, page);
 		list_add(&page->lru, &pages);
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+		vb->num_pages -= 1;
+#else
 		vb->num_pages -= VIRTIO_BALLOON_PAGES_PER_PAGE;
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 	}
 
 	num_freed_pages = vb->num_pfns;
@@ -305,7 +335,7 @@ static unsigned int leak_balloon(struct virtio_balloon *vb, size_t num)
    * virtio-balloons device handler function. Otherwise, we can't measure the time
    * it takes virtio-balloon to release the pages during the deflation.
    *
-   * Besides, functionally it shouldn't make much of a difference - as far as 
+   * Besides, functionally it shouldn't make much of a difference - as far as
    * I understand MADV_WILLNEED does not do anything anyways...
 	 */
 	release_pages_balloon(vb, &pages);
@@ -854,8 +884,12 @@ static int virtio_balloon_oom_notify(struct notifier_block *nb,
 						 struct virtio_balloon, oom_nb);
 	unsigned long *freed = parm;
 
+#ifdef CONFIG_VIRTIO_BALLOON_HUGE
+	*freed += leak_balloon(vb, 1);
+#else
 	*freed += leak_balloon(vb, VIRTIO_BALLOON_OOM_NR_PAGES) /
 		  VIRTIO_BALLOON_PAGES_PER_PAGE;
+#endif // CONFIG_VIRTIO_BALLOON_HUGE
 	update_balloon_size(vb);
 
 	return NOTIFY_OK;

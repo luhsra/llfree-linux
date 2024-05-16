@@ -60,6 +60,7 @@ struct balloon_dev_info {
 };
 
 extern struct page *balloon_page_alloc(void);
+extern struct page *balloon_huge_page_alloc(void);
 extern void balloon_page_enqueue(struct balloon_dev_info *b_dev_info,
 				 struct page *page);
 extern struct page *balloon_page_dequeue(struct balloon_dev_info *b_dev_info);

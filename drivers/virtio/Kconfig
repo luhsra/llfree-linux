@@ -115,6 +115,13 @@ config VIRTIO_BALLOON
 
 	 If unsure, say M.
 
+config VIRTIO_BALLOON_HUGE
+	tristate "Virtio balloon driver huge"
+	depends on VIRTIO
+	select VIRTIO_BALLOON
+	help
+	 Use huge pages for ballooning
+
 config VIRTIO_BALLOON_ENABLE_BENCHMARK_MODIFICATIONS
 	tristate "enable virtio-balloon benchmarking modifications"
 	depends on VIRTIO_BALLOON

@@ -48,6 +48,7 @@
 #include <linux/vmstat.h>
 #include <linux/mempolicy.h>
 #include <linux/memremap.h>
+#include <linux/mmzone.h>
 #include <linux/stop_machine.h>
 #include <linux/random.h>
 #include <linux/sort.h>
@@ -86,6 +87,8 @@
 #include "shuffle.h"
 #include "page_reporting.h"
 #include "swap.h"
+
+extern void ll_request_mapping(struct zone * zone, uint64_t frame, size_t core);
 
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -1109,8 +1112,8 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1136,8 +1139,8 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -1201,8 +1204,8 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
-	if (!llfree_ok(ret)) {
-		pr_err("llfree: err %lld", ret.val);
+	if (!llfree_is_ok(ret)) {
+		pr_err("llfree: err %u", ret.error);
 		llfree_print(zone->llfree);
 		VM_BUG_ON_PAGE(true, page);
 	}
@@ -3360,7 +3363,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		cpu = get_cpu();
 		ret = llfree_drain(zone->llfree, cpu);
 		put_cpu();
-		BUG_ON(!llfree_ok(ret));
+		BUG_ON(!llfree_is_ok(ret));
 	}
 #endif
 }
@@ -3393,7 +3396,7 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		ret = llfree_drain(zone->llfree, cpu);
 		put_cpu();
 		local_irq_restore(flags);
-		BUG_ON(!llfree_ok(ret));
+		BUG_ON(!llfree_is_ok(ret));
 	}
 #endif
 }
@@ -4118,23 +4121,22 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 	llf.movable = gfp_flags & __GFP_MOVABLE ? 1 : 0;
 
 	cpu = get_cpu();
+
 	res = llfree_get(zone->llfree, cpu, llf);
-
-	if (!llfree_ok(res)) {
+	if (!llfree_is_ok(res)) {
 		put_cpu();
-		pr_err("llfree: err %lld", res.val);
-		if (res.val != LLFREE_ERR_MEMORY)
-			llfree_print(zone->llfree);
-		BUG_ON(res.val != LLFREE_ERR_MEMORY);
+		pr_err("llfree thread %lu: error %ld", current->pid, res.frame);
+		BUG_ON(res.error != LLFREE_ERR_MEMORY);
 	} else {
-		size_t offset;
+		size_t offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+		page = pfn_to_page(offset + res.frame);
 
-		offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
-		page = pfn_to_page(offset + res.val);
+		VM_BUG_ON_PAGE(res.reclaimed, page); // No auto deflation!
+
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
-		size_counters_trace(true, gfp_flags, order, res.val);
+		size_counters_trace(true, gfp_flags, order, offset + res.frame);
 		put_cpu();
 	}
 

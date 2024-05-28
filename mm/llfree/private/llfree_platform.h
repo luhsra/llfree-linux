@@ -8,6 +8,8 @@
 #include <asm/page_types.h>
 #include <asm/pgtable_types.h>
 
+#define ll_align(align) __attribute__((aligned(align)))
+
 #define UINT64_MAX 0xffffffffffffffffllu
 #define PRIu64 "llu"
 #define PRIx64 "llx"
@@ -40,6 +42,9 @@
 #define LLFREE_TREE_CHILDREN (1u << LLFREE_TREE_CHILDREN_ORDER)
 #define LLFREE_TREE_ORDER (LLFREE_HUGE_ORDER + LLFREE_TREE_CHILDREN_ORDER)
 #define LLFREE_TREE_SIZE (1u << LLFREE_TREE_ORDER)
+
+/// Enable reserve on free heuristic
+#define LLFREE_ENABLE_FREE_RESERVE false
 
 /// Minimal alignment the llc requires for its memory range
 #define LLFREE_ALIGN (1u << LLFREE_MAX_ORDER << LLFREE_FRAME_BITS)

@@ -47,7 +47,7 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 	llfree_result_t res =
 		llfree_init(self, cores, pages, LLFREE_INIT_ALLOC, meta);
 
-	BUG_ON(!llfree_ok(res));
+	BUG_ON(!llfree_is_ok(res));
 
 	return self;
 }

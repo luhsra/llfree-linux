@@ -2817,7 +2817,8 @@ int move_freepages_block(struct zone *zone, struct page *page,
 int move_freepages_block(struct zone *zone, struct page *page, int migratetype,
 			 int *num_movable)
 {
-	WARN_ON(true);
+	WARN_ON(true); // TODO: Prevent llfree from allocating this...
+	
 	return 0;
 }
 #endif // CONFIG_LLFREE

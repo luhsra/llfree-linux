@@ -1007,6 +1007,7 @@ static int virtballoon_probe(struct virtio_device *vdev)
 		unsigned int capacity;
 
 		capacity = virtqueue_get_vring_size(vb->reporting_vq);
+		WARN_ON_ONCE(capacity < PAGE_REPORTING_CAPACITY);
 		if (capacity < PAGE_REPORTING_CAPACITY) {
 			err = -ENOSPC;
 			goto out_unregister_oom;

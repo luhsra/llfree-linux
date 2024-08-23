@@ -1657,7 +1657,7 @@ static void enable_page_reporting(void)
 		return;
 	}
 
-	BUILD_BUG_ON(PAGE_REPORTING_CAPACITY > HV_MEMORY_HINT_MAX_GPA_PAGE_RANGES);
+	BUG_ON(PAGE_REPORTING_CAPACITY > HV_MEMORY_HINT_MAX_GPA_PAGE_RANGES);
 	dm_device.pr_dev_info.report = hv_free_page_report;
 	ret = page_reporting_register(&dm_device.pr_dev_info);
 	if (ret < 0) {

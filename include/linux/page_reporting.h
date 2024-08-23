@@ -6,7 +6,8 @@
 #include <linux/scatterlist.h>
 
 /* This value should always be a power of 2, see page_reporting_cycle() */
-#define PAGE_REPORTING_CAPACITY		32
+extern unsigned int page_reporting_capacity;
+#define PAGE_REPORTING_CAPACITY page_reporting_capacity
 
 struct page_reporting_dev_info {
 	/* function that alters pages to make them "reported" */

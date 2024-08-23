@@ -15,7 +15,15 @@ unsigned int page_reporting_order = MAX_ORDER;
 module_param(page_reporting_order, uint, 0644);
 MODULE_PARM_DESC(page_reporting_order, "Set page reporting order");
 
-#define PAGE_REPORTING_DELAY	(2 * HZ)
+unsigned int page_reporting_delay = 2 * HZ;
+module_param(page_reporting_delay, uint, 0644);
+MODULE_PARM_DESC(page_reporting_delay, "Set the page reporting delay");
+
+unsigned int page_reporting_capacity = 32;
+module_param(page_reporting_capacity, uint , 0644);
+MODULE_PARM_DESC(page_reporting_capacity, "Set the page reporting capacity");
+
+#define PAGE_REPORTING_DELAY	page_reporting_delay
 static struct page_reporting_dev_info __rcu *pr_dev_info __read_mostly;
 
 enum {

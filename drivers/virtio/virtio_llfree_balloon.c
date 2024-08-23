@@ -1,35 +1,17 @@
-#include "linux/align.h"
-#include "linux/cpumask.h"
-#include "linux/gfp_types.h"
-#include "linux/mmzone.h"
-#include "linux/spinlock.h"
-#include "linux/types.h"
-#include "linux/virtio_config.h"
+#include "linux/virtio_llfree_balloon.h"
+
 #include "llfree.h"
 #include <linux/virtio.h>
-#include <linux/virtio_llfree_balloon.h>
-#include <linux/swap.h>
+#include <linux/virtio_config.h>
+#include <linux/virtio_ids.h>
 #include <linux/workqueue.h>
-#include <linux/delay.h>
-#include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/balloon_compaction.h>
-#include <linux/oom.h>
-#include <linux/wait.h>
-#include <linux/mm.h>
-#include <linux/page_reporting.h>
 #include <linux/vmscan.h>
-#include <linux/delay.h>
-#include <linux/drop_caches.h>
 
 /*-----------------------------------------------------------------------------------------------
-| Defines
+| Shared Data
 -------------------------------------------------------------------------------------------------*/
-#define DROP_PAGECACHE_DELAY 20
 
-/*-----------------------------------------------------------------------------------------------
-| Shared Structs and Enums
--------------------------------------------------------------------------------------------------*/
 enum ll_zone_type {
 	LLFREE_ZONE_DMA32,
 	LLFREE_ZONE_NORMAL,
@@ -49,13 +31,8 @@ typedef struct ll_install_info {
 } ll_install_info_t;
 
 /*-----------------------------------------------------------------------------------------------
-| Structs
+| Private Data
 -------------------------------------------------------------------------------------------------*/
-
-struct ll_vq_buffer {
-	void *buf;
-	size_t len;
-};
 
 typedef struct ll_zone_info {
 	llfree_meta_t llfree_meta;
@@ -73,17 +50,14 @@ typedef struct ll_balloon {
 	struct virtqueue *notify_vq;
 	struct virtqueue **install_vqs;
 	struct work_struct shrink_pagecache_work;
-	struct ll_vq_buffer vq_buffer;
-	ll_notification_t guest_req;
-	ll_install_info_t *install_info;
+	ll_zone_info_t info_buf;
+	ll_notification_t notify_buf;
+	ll_install_info_t *install_buf;
 	enum ll_zone_type map_zone_type[LLFREE_ZONE_LEN];
 } ll_balloon_t;
 
 static ll_balloon_t *balloon;
 
-/*-----------------------------------------------------------------------------------------------
-| Enums
--------------------------------------------------------------------------------------------------*/
 enum ll_balloon_vq {
 	LL_BALLOON_VQ_INFO,
 	LL_BALLOON_VQ_NOTIFY,
@@ -93,6 +67,7 @@ enum ll_balloon_vq {
 /*-----------------------------------------------------------------------------------------------
 | Helper Functions
 -------------------------------------------------------------------------------------------------*/
+
 static void ll_init_zone_types(enum ll_zone_type *types)
 {
 	for (uint32_t i = 0; i < __MAX_NR_ZONES; i++) {
@@ -118,37 +93,31 @@ static inline int32_t zone_get_type(struct zone *zone)
 	return -1;
 }
 
-void llfree_copy_into_buffer(ll_zone_info_t *llfree_info, void *buffer)
+static void llfree_copy_into_buffer(ll_zone_info_t *src, ll_zone_info_t *dest)
 {
-	ll_zone_info_t *dest;
-	if (!buffer) {
-		pr_err("llfree_copy_into_buffer: buffer is null pointer\n");
-		return;
-	}
+	llfree_meta_t *src_meta = &src->llfree_meta;
 
-	dest = (ll_zone_info_t *)buffer;
-	dest->start_pfn = llfree_info->start_pfn;
-	dest->pages = llfree_info->pages;
-	dest->type = llfree_info->type;
-	dest->node = llfree_info->node;
-
-	// translating gva to gpa
-	dest->llfree_meta.local =
-		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.local);
-	dest->llfree_meta.trees =
-		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.trees);
-	dest->llfree_meta.lower =
-		(uint8_t *)virt_to_phys(llfree_info->llfree_meta.lower);
-
-	dest->free_pages =
-		(_Atomic(int64_t) *)virt_to_phys(llfree_info->free_pages);
-	dest->file_pages =
-		(_Atomic(int64_t) *)virt_to_phys(llfree_info->file_pages);
+	BUG_ON(src == NULL || dest == NULL);
+	*dest = (ll_zone_info_t){
+		.llfree_meta = {
+			.local = (uint8_t *)virt_to_phys(src_meta->local),
+			.trees = (uint8_t *)virt_to_phys(src_meta->trees),
+			.lower = (uint8_t *)virt_to_phys(src_meta->lower),
+		},
+		.start_pfn = src->start_pfn,
+		.pages = src->pages,
+		.type = src->type,
+		.node = src->node,
+		.free_pages = (_Atomic(int64_t) *)virt_to_phys(src->free_pages),
+		.file_pages = (_Atomic(int64_t) *)virt_to_phys(src->file_pages),
+	};
 }
 
 /*-----------------------------------------------------------------------------------------------
 | Virtqueue Sending Functions
 -------------------------------------------------------------------------------------------------*/
+
+/// Send allocator data to host
 static void ll_send_info(ll_balloon_t *vb)
 {
 	ll_zone_info_t zone_info;
@@ -174,9 +143,9 @@ static void ll_send_info(ll_balloon_t *vb)
 		zone_info.file_pages = (_Atomic(int64_t) *)&zone->zone_pgdat
 					       ->vm_stat[NR_FILE_PAGES];
 
-		llfree_copy_into_buffer(&zone_info, vb->vq_buffer.buf);
+		llfree_copy_into_buffer(&zone_info, &vb->info_buf);
 
-		sg_init_one(&sg, vb->vq_buffer.buf, vb->vq_buffer.len);
+		sg_init_one(&sg, &vb->info_buf, sizeof(vb->info_buf));
 		virtqueue_add_outbuf(vb->info_vq, &sg, 1, vb, GFP_KERNEL);
 		virtqueue_kick(vb->info_vq);
 
@@ -187,6 +156,7 @@ static void ll_send_info(ll_balloon_t *vb)
 	}
 }
 
+/// Notify the host
 static void ll_notify(ll_balloon_t *vb, ll_notification_t request)
 {
 	struct scatterlist sg;
@@ -196,8 +166,8 @@ static void ll_notify(ll_balloon_t *vb, ll_notification_t request)
 		return;
 	}
 
-	vb->guest_req = request;
-	sg_init_one(&sg, &vb->guest_req, sizeof(ll_notification_t));
+	vb->notify_buf = request;
+	sg_init_one(&sg, &vb->notify_buf, sizeof(ll_notification_t));
 	virtqueue_add_outbuf(vb->notify_vq, &sg, 1, vb, GFP_KERNEL);
 	virtqueue_kick(vb->notify_vq);
 
@@ -214,7 +184,7 @@ void ll_request_install(struct zone *zone, uint64_t frame, size_t core)
 	uint32_t len;
 	unsigned long flags;
 
-	ll_install_info_t *info = &balloon->install_info[core];
+	ll_install_info_t *info = &balloon->install_buf[core];
 	struct virtqueue *vq = balloon->install_vqs[core];
 
 	uint32_t zone_type = zone_get_type(zone);
@@ -244,9 +214,7 @@ void ll_request_install(struct zone *zone, uint64_t frame, size_t core)
 }
 EXPORT_SYMBOL(ll_request_install);
 
-/*-----------------------------------------------------------------------------------------------
-| Pagecache Shrinking Functions
--------------------------------------------------------------------------------------------------*/
+/// Shrink the page cache
 static void shrink_pagecache_func(struct work_struct *work)
 {
 	ll_balloon_t *vb;
@@ -271,14 +239,11 @@ static void shrink_pagecache_func(struct work_struct *work)
 			 shrink_pagecache_num_pages,
 			 &shrink_pagecache_num_pages);
 
-	// tell virtio-device to retry inflation now that we have shrunk
-	// the pagecache
+	// tell virtio-device to retry reclamation
 	ll_notify(vb, PAGECACHE_DROPPED);
 }
 
-/*-----------------------------------------------------------------------------------------------
-| General Virtio Functions
--------------------------------------------------------------------------------------------------*/
+/// Executed if the config changes
 static void ll_config_changed(struct virtio_device *vdev)
 {
 	ll_balloon_t *vb;
@@ -309,27 +274,22 @@ static int init_vqs(ll_balloon_t *vb)
 	uint32_t num_cpus = num_online_cpus();
 	uint32_t num_vqs = LL_BALLOON_VQ_COUNT + num_cpus;
 
-	vqs = kzalloc((num_vqs * sizeof(struct virtqueue *)), GFP_KERNEL);
-	callbacks = kzalloc(num_vqs * (sizeof(vq_callback_t *)), GFP_KERNEL);
+	callbacks = kzalloc(num_vqs * sizeof(vq_callback_t *), GFP_KERNEL);
+
 	names = kzalloc((num_vqs * sizeof(char *)), GFP_KERNEL);
-
-	callbacks[LL_BALLOON_VQ_INFO] = NULL;
 	names[LL_BALLOON_VQ_INFO] = "llfree info";
-	callbacks[LL_BALLOON_VQ_NOTIFY] = NULL;
-	names[LL_BALLOON_VQ_NOTIFY] = "llfree acknowledge pagecache";
-
+	names[LL_BALLOON_VQ_NOTIFY] = "llfree notify";
 	for (uint32_t i = 0; i < num_cpus; i++) {
-		callbacks[LL_BALLOON_VQ_COUNT + i] = NULL;
-		names[LL_BALLOON_VQ_COUNT + i] = "llfree auto-deflate vq";
+		names[LL_BALLOON_VQ_COUNT + i] = "llfree install";
 	}
 
+	vqs = kzalloc(num_vqs * sizeof(struct virtqueue *), GFP_KERNEL);
 	err = virtio_find_vqs(vb->vdev, num_vqs, vqs, callbacks, names, NULL);
 	if (err)
 		return err;
 
 	vb->info_vq = vqs[LL_BALLOON_VQ_INFO];
 	vb->notify_vq = vqs[LL_BALLOON_VQ_NOTIFY];
-
 	for (uint32_t i = 0; i < num_cpus; i++) {
 		vb->install_vqs[i] = vqs[LL_BALLOON_VQ_COUNT + i];
 	}
@@ -341,19 +301,12 @@ static int ll_probe(struct virtio_device *vdev)
 {
 	ll_balloon_t *ll_b;
 	int err;
-	uint32_t __maybe_unused num_cores;
+	uint32_t num_cores;
 
-	if (!vdev->config->get) {
-		dev_err(&vdev->dev, "%s failure: config access disabled\n",
-			__func__);
-		return -EINVAL;
-	}
+	BUG_ON(vdev->config->get == NULL);
 
 	ll_b = kzalloc(sizeof(*ll_b), GFP_KERNEL);
-	if (ll_b == NULL) {
-		err = -ENOMEM;
-		return err;
-	}
+	BUG_ON(ll_b == NULL);
 	vdev->priv = ll_b;
 
 	if (virtio_has_feature(vdev, LL_BALLOON_F_SHRINK_PAGECACHE)) {
@@ -362,30 +315,23 @@ static int ll_probe(struct virtio_device *vdev)
 
 	ll_init_zone_types((enum ll_zone_type *)&ll_b->map_zone_type);
 
-	ll_b->vq_buffer.len = sizeof(ll_zone_info_t);
-	ll_b->vq_buffer.buf = kzalloc(sizeof(ll_zone_info_t), GFP_KERNEL);
-	if (ll_b->vq_buffer.buf == NULL) {
-		err = -ENOMEM;
-		return err;
-	}
-
 	ll_b->vdev = vdev;
 
 	num_cores = num_online_cpus();
-	ll_b->install_info =
+	ll_b->install_buf =
 		kzalloc(sizeof(ll_install_info_t) * num_cores, GFP_KERNEL);
 	ll_b->install_vqs =
 		kzalloc(sizeof(struct virtqueue *) * num_cores, GFP_KERNEL);
-	if (ll_b->install_info == NULL || ll_b->install_vqs == NULL) {
-		err = -ENOMEM;
-		goto cleanup;
-	}
+	BUG_ON(ll_b->install_buf == NULL || ll_b->install_vqs == NULL);
 
 	err = init_vqs(ll_b);
-	if (err)
-		goto cleanup;
+	if (err) {
+		kfree(ll_b->install_buf);
+		kfree(ll_b->install_vqs);
+		kfree(ll_b);
+		return err;
+	}
 
-	// enable global auto-deflate function call...
 	balloon = ll_b;
 
 	virtio_device_ready(vdev);
@@ -394,16 +340,6 @@ static int ll_probe(struct virtio_device *vdev)
 	ll_send_info(ll_b);
 
 	return 0;
-
-cleanup:
-	if (ll_b->vq_buffer.buf != NULL)
-		kfree(ll_b->vq_buffer.buf);
-	if (ll_b->install_info != NULL)
-		kfree(ll_b->install_info);
-	if (ll_b->install_vqs != NULL)
-		kfree(ll_b->install_vqs);
-	kfree(ll_b);
-	return err;
 }
 
 static void remove_common(ll_balloon_t *vb)
@@ -418,8 +354,7 @@ static void ll_remove(struct virtio_device *vdev)
 	ll_balloon_t *vb = vdev->priv;
 
 	kfree(vb->install_vqs);
-	kfree(vb->install_info);
-	kfree(vb->vq_buffer.buf);
+	kfree(vb->install_buf);
 	remove_common(vb);
 	kfree(vb);
 }

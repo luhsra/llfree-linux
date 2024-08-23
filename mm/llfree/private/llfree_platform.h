@@ -8,6 +8,8 @@
 #include <asm/page_types.h>
 #include <asm/pgtable_types.h>
 
+#define ll_align(align) __attribute__((aligned(align)))
+
 #define UINT64_MAX 0xffffffffffffffffllu
 #define PRIu64 "llu"
 #define PRIx64 "llx"

@@ -1,4 +1,4 @@
 
 [submodule "mm/llfree/llc"]
 	path = mm/llfree/llc
-	url = https://scm.sra.uni-hannover.de/research/llfree/llfree-c-ballooning.git
+	url = git@github.com:luhsra/llfree-c.git

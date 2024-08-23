@@ -32,8 +32,10 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
-	pr_info("node=%" PRIuS ", offset=%" PRIu64 ", pages=%" PRIuS, node,
-		offset, pages);
+	pr_info("node=%" PRIuS ", offset=%" PRIu64 ", pages=%" PRIuS
+		", trees=%" PRIuS ", children=%" PRIuS "\n",
+		node, offset, pages, div_ceil(pages, LLFREE_TREE_SIZE),
+		div_ceil(pages, LLFREE_CHILD_SIZE));
 
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);

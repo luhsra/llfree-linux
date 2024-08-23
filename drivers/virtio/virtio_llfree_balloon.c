@@ -38,16 +38,16 @@ enum ll_zone_type {
 	LLFREE_ZONE_NONE = -1,
 };
 
-typedef enum ll_request {
-	SCHEDULE_LLFREE_BALLOON_UPDATE,
-} ll_request_t;
+typedef enum ll_notification {
+	PAGECACHE_DROPPED,
+} ll_notification_t;
 
-typedef struct ll_deflate_info {
+typedef struct ll_install_info {
 	uint32_t node;
 	uint32_t zone;
 	uint32_t core;
 	uint64_t frame;
-} deflate_info_t;
+} install_info_t;
 
 /*-----------------------------------------------------------------------------------------------
 | Structs
@@ -70,13 +70,12 @@ typedef struct ll_zone_info {
 struct ll_balloon {
 	struct virtio_device *vdev;
 	struct virtqueue *info_vq;
-	struct virtqueue *request_vq;
-	struct virtqueue **deflate_vqs;
+	struct virtqueue *notify_vq;
+	struct virtqueue **install_vqs;
 	struct work_struct shrink_pagecache_work;
-	struct task_struct *drop_pagecache_thread;
 	struct ll_vq_buffer vq_buffer;
-	ll_request_t guest_req;
-	deflate_info_t *deflate_info;
+	ll_notification_t guest_req;
+	install_info_t *install_info;
 	enum ll_zone_type map_zone_type[LLFREE_ZONE_LEN];
 };
 
@@ -87,7 +86,7 @@ static struct ll_balloon *vb_llfree;
 -------------------------------------------------------------------------------------------------*/
 enum ll_balloon_vq {
 	LL_BALLOON_VQ_INFO,
-	LL_BALLOON_VQ_REQUEST,
+	LL_BALLOON_VQ_NOTIFY,
 	LL_BALLOON_VQ_COUNT,
 };
 
@@ -188,7 +187,7 @@ static void ll_send_info(struct ll_balloon *vb)
 	}
 }
 
-static void ll_send_request(struct ll_balloon *vb, ll_request_t request)
+static void ll_notify(struct ll_balloon *vb, ll_notification_t request)
 {
 	struct scatterlist sg;
 	uint32_t len;
@@ -200,25 +199,25 @@ static void ll_send_request(struct ll_balloon *vb, ll_request_t request)
 	}
 
 	vb->guest_req = request;
-	sg_init_one(&sg, &vb->guest_req, sizeof(ll_request_t));
-	virtqueue_add_outbuf(vb->request_vq, &sg, 1, vb, GFP_KERNEL);
-	virtqueue_kick(vb->request_vq);
+	sg_init_one(&sg, &vb->guest_req, sizeof(ll_notification_t));
+	virtqueue_add_outbuf(vb->notify_vq, &sg, 1, vb, GFP_KERNEL);
+	virtqueue_kick(vb->notify_vq);
 
 	// sync with virtio-device
-	while (!virtqueue_get_buf(vb->request_vq, &len) &&
-	       !virtqueue_is_broken(vb->request_vq))
+	while (!virtqueue_get_buf(vb->notify_vq, &len) &&
+	       !virtqueue_is_broken(vb->notify_vq))
 		cpu_relax();
 }
 
 // Assumes that preemption is already disabled!
-void ll_request_mapping(struct zone *zone, uint64_t frame, size_t core)
+void ll_request_install(struct zone *zone, uint64_t frame, size_t core)
 {
 	struct scatterlist sg;
 	uint32_t len;
 	unsigned long flags;
 
-	deflate_info_t *info = &vb_llfree->deflate_info[core];
-	struct virtqueue *vq = vb_llfree->deflate_vqs[core];
+	install_info_t *info = &vb_llfree->install_info[core];
+	struct virtqueue *vq = vb_llfree->install_vqs[core];
 
 	uint32_t zone_type = zone_get_type(zone);
 	if (zone_type == -1 || zone->llfree == NULL) {
@@ -228,18 +227,14 @@ void ll_request_mapping(struct zone *zone, uint64_t frame, size_t core)
 
 	local_irq_save(flags);
 
-	// skip if already mapped (might happen on parallel alloc)
-	if (!llfree_is_reclaimed(zone->llfree, frame))
-		goto out;
-
 	// send information
-	*info = (deflate_info_t){
+	*info = (install_info_t){
 		.node = zone->node,
 		.zone = vb_llfree->map_zone_type[zone_type],
 		.core = core,
 		.frame = frame,
 	};
-	sg_init_one(&sg, info, sizeof(deflate_info_t));
+	sg_init_one(&sg, info, sizeof(install_info_t));
 	virtqueue_add_outbuf(vq, &sg, 1, vb_llfree, GFP_KERNEL);
 	virtqueue_kick(vq);
 
@@ -248,10 +243,9 @@ void ll_request_mapping(struct zone *zone, uint64_t frame, size_t core)
 	while (!virtqueue_get_buf(vq, &len) && !virtqueue_is_broken(vq))
 		cpu_relax();
 
-out:
 	local_irq_restore(flags);
 }
-EXPORT_SYMBOL(ll_request_mapping);
+EXPORT_SYMBOL(ll_request_install);
 
 /*-----------------------------------------------------------------------------------------------
 | Pagecache Shrinking Functions
@@ -282,17 +276,7 @@ static void shrink_pagecache_func(struct work_struct *work)
 
 	// tell virtio-device to retry inflation now that we have shrunk
 	// the pagecache
-	ll_send_request(vb, SCHEDULE_LLFREE_BALLOON_UPDATE);
-}
-
-static int drop_pagecache_thread(void *arg)
-{
-	while (true) {
-		drop_pagecache();
-		ssleep(DROP_PAGECACHE_DELAY);
-	}
-
-	return 0;
+	ll_notify(vb, PAGECACHE_DROPPED);
 }
 
 /*-----------------------------------------------------------------------------------------------
@@ -335,8 +319,8 @@ static int init_vqs(struct ll_balloon *vb)
 
 	callbacks[LL_BALLOON_VQ_INFO] = NULL;
 	names[LL_BALLOON_VQ_INFO] = "llfree info";
-	callbacks[LL_BALLOON_VQ_REQUEST] = NULL;
-	names[LL_BALLOON_VQ_REQUEST] = "llfree requests";
+	callbacks[LL_BALLOON_VQ_NOTIFY] = NULL;
+	names[LL_BALLOON_VQ_NOTIFY] = "llfree acknowledge pagecache";
 
 	for (uint32_t i = 0; i < num_cpus; i++) {
 		callbacks[LL_BALLOON_VQ_COUNT + i] = NULL;
@@ -348,10 +332,10 @@ static int init_vqs(struct ll_balloon *vb)
 		return err;
 
 	vb->info_vq = vqs[LL_BALLOON_VQ_INFO];
-	vb->request_vq = vqs[LL_BALLOON_VQ_REQUEST];
+	vb->notify_vq = vqs[LL_BALLOON_VQ_NOTIFY];
 
 	for (uint32_t i = 0; i < num_cpus; i++) {
-		vb->deflate_vqs[i] = vqs[LL_BALLOON_VQ_COUNT + i];
+		vb->install_vqs[i] = vqs[LL_BALLOON_VQ_COUNT + i];
 	}
 
 	return 0;
@@ -393,11 +377,11 @@ static int ll_probe(struct virtio_device *vdev)
 	vb->vdev = vdev;
 
 	num_cores = num_online_cpus();
-	vb->deflate_info =
-		kzalloc(sizeof(deflate_info_t) * num_cores, GFP_KERNEL);
-	vb->deflate_vqs =
+	vb->install_info =
+		kzalloc(sizeof(install_info_t) * num_cores, GFP_KERNEL);
+	vb->install_vqs =
 		kzalloc(sizeof(struct virtqueue *) * num_cores, GFP_KERNEL);
-	if (vb->deflate_info == NULL || vb->deflate_vqs == NULL) {
+	if (vb->install_info == NULL || vb->install_vqs == NULL) {
 		err = -ENOMEM;
 		goto cleanup;
 	}
@@ -414,23 +398,15 @@ static int ll_probe(struct virtio_device *vdev)
 	// directly send our zone info to our virtio-device
 	ll_send_info(vb);
 
-	// optionally, start our pagecache drop thread
-	if (virtio_has_feature(
-		    vdev, VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE) &&
-	    virtio_has_feature(vdev, VIRTIO_LLFREE_BALLOON_F_AUTO_MODE)) {
-		vb->drop_pagecache_thread = kthread_run(
-			drop_pagecache_thread, NULL, "drop-pagecache-thread");
-	}
-
 	return 0;
 
 cleanup:
 	if (vb->vq_buffer.buf != NULL)
 		kfree(vb->vq_buffer.buf);
-	if (vb->deflate_info != NULL)
-		kfree(vb->deflate_info);
-	if (vb->deflate_vqs != NULL)
-		kfree(vb->deflate_vqs);
+	if (vb->install_info != NULL)
+		kfree(vb->install_info);
+	if (vb->install_vqs != NULL)
+		kfree(vb->install_vqs);
 	kfree(vb);
 	return err;
 }
@@ -445,10 +421,9 @@ static void remove_common(struct ll_balloon *vb)
 static void ll_remove(struct virtio_device *vdev)
 {
 	struct ll_balloon *vb = vdev->priv;
-	kthread_stop(vb->drop_pagecache_thread);
 
-	kfree(vb->deflate_vqs);
-	kfree(vb->deflate_info);
+	kfree(vb->install_vqs);
+	kfree(vb->install_info);
 	kfree(vb->vq_buffer.buf);
 	remove_common(vb);
 	kfree(vb);

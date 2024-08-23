@@ -31,16 +31,13 @@
 #include "linux/virtio_config.h"
 
 /* The feature bitmap for virtio llfree balloon */
-#define VIRTIO_LLFREE_BALLOON_F_DEMAND_SHRINK_PAGECACHE 1
-// #define VIRTIO_LLFREE_BALLOON_F_ALLOCATING_DEFLATE 2
-// #define VIRTIO_LLFREE_BALLOON_F_GUEST_TRIGGERED_DEFLATE 3
-#define VIRTIO_LLFREE_BALLOON_F_AUTO_MODE 4
-#define VIRTIO_LLFREE_BALLOON_F_MULTI_THREADED 5
-#define VIRTIO_LLFREE_BALLOON_F_VFIO 6
-#define VIRTIO_LLFREE_BALLOON_F_KVM_MAP_MEMORY_REGION_IOCTL 7
+#define LL_BALLOON_F_SHRINK_PAGECACHE 1
+#define LL_BALLOON_F_AUTO_MODE 4
+#define LL_BALLOON_F_VFIO 6
+#define LL_BALLOON_F_KVM_MAP_IOCTL 7
 
 
-struct virtio_llfree_balloon_config {
+struct ll_balloon_config {
 	/* Number of pages host wants Guest to shrink the pagecache. */
 	__le32 shrink_pagecache_num_pages;
 	__le32 num_numa_node;

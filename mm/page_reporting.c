@@ -339,9 +339,8 @@ int page_reporting_register(struct page_reporting_dev_info *prdev)
 
 	/*
 	 * Update the page reporting order if it's specified by driver.
-	 * Otherwise, it falls back to @pageblock_order.
 	 */
-	page_reporting_order = prdev->order ? : pageblock_order;
+	page_reporting_order = prdev->order ?: page_reporting_order;
 
 	/* initialize state and work structures */
 	atomic_set(&prdev->state, PAGE_REPORTING_IDLE);

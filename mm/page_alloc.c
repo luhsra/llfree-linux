@@ -1109,12 +1109,13 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 	BUG_ON(frame < 0);
 
 	cpu = get_cpu();
-	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	ret = llfree_put(zone->llfree_dirty, zone->llfree_zeroed, cpu, frame,
+			 llflags(order));
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 	if (!llfree_is_ok(ret)) {
 		pr_err("llfree: err %u", ret.error);
-		llfree_print(zone->llfree);
+		llfree_print(zone->llfree_dirty);
 		VM_BUG_ON_PAGE(true, page);
 	}
 }
@@ -1135,13 +1136,14 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	BUG_ON(frame < 0);
 
 	cpu = get_cpu();
-	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	ret = llfree_put(zone->llfree_dirty, zone->llfree_zeroed, cpu, frame,
+			 llflags(order));
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
 	if (!llfree_is_ok(ret)) {
 		pr_err("llfree: err %u", ret.error);
-		llfree_print(zone->llfree);
+		llfree_print(zone->llfree_dirty);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -1189,7 +1191,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	s64 frame;
 	struct capture_control *capc = task_capc(zone);
 
-	VM_BUG_ON(zone->llfree == NULL);
+	VM_BUG_ON(zone->llfree_dirty == NULL);
 
 	frame = page_to_pfn(page) -
 		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
@@ -1200,13 +1202,14 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 	    !compaction_capture(capc, page, order, migratetype))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
-	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
+	ret = llfree_put(zone->llfree_dirty, zone->llfree_zeroed, cpu, frame,
+			 llflags(order));
 	size_counters_trace(false, 0, order, frame);
 	put_cpu();
 
 	if (!llfree_is_ok(ret)) {
 		pr_err("llfree: err %u", ret.error);
-		llfree_print(zone->llfree);
+		llfree_print(zone->llfree_dirty);
 		VM_BUG_ON_PAGE(true, page);
 	}
 
@@ -3358,11 +3361,11 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
 #else
-	if (zone->llfree) {
+	if (zone->llfree_dirty) {
 		u64 cpu;
 		llfree_result_t ret;
 		cpu = get_cpu();
-		ret = llfree_drain(zone->llfree, cpu);
+		ret = llfree_drain(zone->llfree_dirty, cpu);
 		put_cpu();
 		BUG_ON(!llfree_is_ok(ret));
 	}
@@ -3388,13 +3391,13 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		spin_unlock_irqrestore(&pcp->lock, flags);
 	}
 #else
-	if (zone->llfree) {
+	if (zone->llfree_dirty) {
 		u64 cpu;
 		llfree_result_t ret;
 		unsigned long flags;
 		local_irq_save(flags);
 		cpu = get_cpu();
-		ret = llfree_drain(zone->llfree, cpu);
+		ret = llfree_drain(zone->llfree_dirty, cpu);
 		put_cpu();
 		local_irq_restore(flags);
 		BUG_ON(!llfree_is_ok(ret));
@@ -4112,18 +4115,24 @@ out:
  */
 static inline struct page *rmqueue(struct zone *preferred_zone,
 				   struct zone *zone, unsigned int order,
-				   gfp_t gfp_flags, unsigned int alloc_flags,
+				   gfp_t *gfp_flags, unsigned int alloc_flags,
 				   int migratetype)
 {
 	struct page *page = NULL;
 	int cpu;
 	llfree_result_t res;
 	llflags_t llf = llflags(order);
-	llf.movable = gfp_flags & __GFP_MOVABLE ? 1 : 0;
+	llf.movable = *gfp_flags & __GFP_MOVABLE ? 1 : 0;
 
 	cpu = get_cpu();
+	res = llfree_get(zone->llfree_zeroed, cpu, llf);
 
-	res = llfree_get(zone->llfree, cpu, llf);
+	if (res.error == LLFREE_ERR_MEMORY) {
+		res = llfree_get(zone->llfree_dirty, cpu, llf);
+	} else {
+		*gfp_flags &= ~__GFP_ZERO;
+	}
+
 	if (!llfree_is_ok(res)) {
 		put_cpu();
 		// pr_err("llfree thread %u: error %lld", current->pid, res.val);
@@ -4145,7 +4154,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
-		size_counters_trace(true, gfp_flags, order, offset + res.frame);
+		size_counters_trace(true, *gfp_flags, order, offset + res.frame);
 		put_cpu();
 	}
 
@@ -4583,10 +4592,10 @@ retry:
 				continue;
 			}
 		}
-
 try_this_zone:
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
-				gfp_mask, alloc_flags, ac->migratetype);
+				&gfp_mask, alloc_flags, ac->migratetype);
+
 		if (page) {
 			prep_new_page(page, order, gfp_mask, alloc_flags);
 

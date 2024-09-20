@@ -141,3 +141,6 @@ obj-$(CONFIG_SHRINKER_DEBUG) += shrinker_debug.o
 
 # LLFree
 obj-y += llfree/
+
+# AsyncZero
+obj-y += page_zero.o

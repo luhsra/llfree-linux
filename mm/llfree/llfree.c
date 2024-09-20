@@ -83,6 +83,27 @@ static void writer(void *arg, char *str)
 	seq_printf((struct seq_file *)arg, "%s", str);
 }
 
+static int llfree_zeroed(struct seq_file *m, void *arg)
+{
+	pg_data_t *pgdat = (pg_data_t *)arg;
+	struct zone *zone;
+	struct zone *node_zones = pgdat->node_zones;
+
+	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
+		llfree_t *llfree_dirty = zone->llfree_dirty;
+		llfree_t *llfree_zeroed = zone->llfree_zeroed;
+
+		if (!populated_zone(zone) || llfree_dirty == NULL)
+			continue;
+		if (!populated_zone(zone) || llfree_zeroed == NULL)
+			continue;
+
+		llfree_print_zeroed(llfree_dirty, writer, m, false);
+		llfree_print_zeroed(llfree_zeroed, writer, m, true);
+	}
+	return 0;
+}
+
 static int llfree_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
@@ -90,12 +111,16 @@ static int llfree_show(struct seq_file *m, void *arg)
 	struct zone *node_zones = pgdat->node_zones;
 
 	for (zone = node_zones; zone - node_zones < MAX_NR_ZONES; ++zone) {
-		llfree_t *llfree = zone->llfree;
+		llfree_t *llfree_dirty = zone->llfree_dirty;
+		llfree_t *llfree_zeroed = zone->llfree_zeroed;
 
-		if (!populated_zone(zone) || llfree == NULL)
+		if (!populated_zone(zone) || llfree_dirty == NULL)
+			continue;
+		if (!populated_zone(zone) || llfree_zeroed == NULL)
 			continue;
 
-		llfree_print_debug(llfree, writer, m);
+		llfree_print_debug(llfree_dirty, writer, m, false);
+		llfree_print_debug(llfree_zeroed, writer, m, true);
 	}
 	return 0;
 }
@@ -110,9 +135,9 @@ static int llfree_frag_show(struct seq_file *m, void *arg)
 		if (!populated_zone(zone))
 			continue;
 
-		for (size_t i = 0; i < llfree_frames(zone->llfree);
+		for (size_t i = 0; i < llfree_frames(zone->llfree_zeroed);
 		     i += 1 << LLFREE_HUGE_ORDER) {
-			size_t free = llfree_free_at(zone->llfree, i,
+			size_t free = llfree_free_at(zone->llfree_zeroed, i,
 						     LLFREE_HUGE_ORDER);
 			// [0, 9], where 0 is entirely allocated and 9 is free
 			size_t level = free == 0 ? 0 : (free / 64 + 1);
@@ -137,11 +162,19 @@ static const struct seq_operations llfree_frag_op = {
 	.show = llfree_frag_show,
 };
 
+static const struct seq_operations llfree_zeroed_op = {
+	.start = frag_start,
+	.next = frag_next,
+	.stop = frag_stop,
+	.show = llfree_zeroed,
+};
+
 static int __init llfree_init_module(void)
 {
 	pr_info("Setup llfree debugging");
 	proc_create_seq("llfree", 0444, NULL, &llfree_op);
 	proc_create_seq("llfree_frag", 0444, NULL, &llfree_frag_op);
+	proc_create_seq("llfree_zeroed", 0444, NULL, &llfree_zeroed_op);
 	return 0;
 }
 module_init(llfree_init_module);

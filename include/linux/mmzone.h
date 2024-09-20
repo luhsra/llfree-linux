@@ -734,7 +734,8 @@ struct zone {
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 #ifdef CONFIG_LLFREE
-	struct llfree *llfree;
+	void *llfree_dirty;
+	void *llfree_zeroed;
 #endif
 	/*
 	 * the high and batch values are copied to individual pagesets for

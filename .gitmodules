@@ -1,4 +1,4 @@
 
 [submodule "mm/llfree/llc"]
 	path = mm/llfree/llc
-	url = git@github.com:luhsra/llfree-c.git
+	url = git@scm.sra.uni-hannover.de:research/llfree/llfree-c-async-zero.git

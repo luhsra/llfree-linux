@@ -128,12 +128,12 @@ static void ll_send_info(ll_balloon_t *vb)
 		struct scatterlist sg;
 		uint32_t len;
 		struct zone *zone = &pgdat->node_zones[i];
+		enum ll_zone_type zone_type = vb->map_zone_type[i];
 
-		if (!populated_zone(zone)) {
+		if (zone_type == LLFREE_ZONE_NONE || !populated_zone(zone))
 			continue;
-		}
 
-		zone_info.type = vb->map_zone_type[i];
+		zone_info.type = zone_type;
 		zone_info.start_pfn = zone->zone_start_pfn;
 		zone_info.pages = zone->spanned_pages;
 		zone_info.node = pgdat->node_id;
@@ -192,6 +192,7 @@ void ll_request_install(struct zone *zone, uint64_t frame, size_t core)
 		pr_warn("llfree_balloon: could not find zone_type!\n");
 		return;
 	}
+	BUG_ON(frame >= zone->spanned_pages);
 
 	local_irq_save(flags);
 

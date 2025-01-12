@@ -217,27 +217,25 @@ EXPORT_SYMBOL(ll_request_install);
 /// Shrink the page cache
 static void shrink_pagecache_func(struct work_struct *work)
 {
-	ll_balloon_t *vb;
-	uint32_t reclaimed_nr_pages;
-	uint32_t shrink_pagecache_num_pages;
-	uint32_t num_numa_node;
+	uint32_t reclaimed_pages = 0;
+	uint32_t shrink_pagecache = 0;
+	uint32_t node = 0;
 
-	vb = container_of(work, ll_balloon_t, shrink_pagecache_work);
+	struct ll_balloon *vb =
+		container_of(work, struct ll_balloon, shrink_pagecache_work);
 
 	virtio_cread_le(vb->vdev, struct ll_balloon_config,
-			shrink_pagecache_num_pages,
-			&shrink_pagecache_num_pages);
+			shrink_pagecache, &shrink_pagecache);
 
-	virtio_cread_le(vb->vdev, struct ll_balloon_config, num_numa_node,
-			&num_numa_node);
+	for_each_node(node) {
+		reclaimed_pages +=
+			shrink_pagecache_for_reclaim(node, shrink_pagecache);
+	}
 
-	reclaimed_nr_pages = shrink_pagecache_for_reclaim(
-		num_numa_node, shrink_pagecache_num_pages);
-
-	shrink_pagecache_num_pages = 0;
+	BUG_ON(reclaimed_pages > shrink_pagecache);
+	shrink_pagecache -= reclaimed_pages;
 	virtio_cwrite_le(vb->vdev, struct ll_balloon_config,
-			 shrink_pagecache_num_pages,
-			 &shrink_pagecache_num_pages);
+			 shrink_pagecache, &shrink_pagecache);
 
 	// tell virtio-device to retry reclamation
 	ll_notify(vb, PAGECACHE_DROPPED);
@@ -247,7 +245,7 @@ static void shrink_pagecache_func(struct work_struct *work)
 static void ll_config_changed(struct virtio_device *vdev)
 {
 	ll_balloon_t *vb;
-	uint32_t shrink_pagecache_num_pages;
+	uint32_t shrink_pagecache;
 
 	if (!virtio_has_feature(vdev, LL_BALLOON_F_SHRINK_PAGECACHE)) {
 		return;
@@ -257,10 +255,10 @@ static void ll_config_changed(struct virtio_device *vdev)
 
 	// dispatch
 	virtio_cread_le(vdev, struct ll_balloon_config,
-			shrink_pagecache_num_pages,
-			&shrink_pagecache_num_pages);
+			shrink_pagecache,
+			&shrink_pagecache);
 
-	if (shrink_pagecache_num_pages > 0) {
+	if (shrink_pagecache > 0) {
 		queue_work(system_freezable_wq, &vb->shrink_pagecache_work);
 	}
 }

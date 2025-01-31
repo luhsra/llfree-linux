@@ -2,6 +2,8 @@
 
 This repository contains a Linux 6.1 with integrated [LLFree](https://github.com/luhsra/llfree-linux) and HyperAlloc.
 
+- See: https://github.com/luhsra/hyperalloc-bench
+
 ## Publication
 
 HyperAlloc: Efficient VM Memory De/Inflation via Hypervisor-Shared Page-Frame Allocators Lars Wrenger, Kenny Albes, Marco Wurps, Christian Dietrich, Daniel Lohmann In: Proceedings of the 20th European Conference on Computer Systems (EuroSys 2025); ACM

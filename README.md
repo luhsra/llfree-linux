@@ -1,47 +1,39 @@
-# Linux with LLFree and LLFree-Balloon
+# HyperAlloc: Linux
 
-In addition to the general dependencies rust `nightly` version `1.64.0` (or newer) is needed.
-> Rustup is recommended: [install rust](https://www.rust-lang.org/learn/get-started)
+This repository contains a Linux 6.1 with integrated [LLFree](https://github.com/luhsra/llfree-linux) and HyperAlloc.
 
-First enable the `CONFIG_LLFREE` and `CONFIG_LLFREE_FAST_FREE` options (`make LLVM=1 menuconfig`) for LLFree. It is currently limited to x86_64.
-To enable LLFree-Balloon, set `CONFIG_VIRTIO_LLFREE_BALLOON`. LLFree-Balloon supports guest triggered auto-deflate. Also, the LLFree-Balloon may be allowed to shrink the Page Cache.
-Then the Kernel can be build as usual (with llvm):
+## Publication
+
+HyperAlloc: Efficient VM Memory De/Inflation via Hypervisor-Shared Page-Frame Allocators Lars Wrenger, Kenny Albes, Marco Wurps, Christian Dietrich, Daniel Lohmann In: Proceedings of the 20th European Conference on Computer Systems (EuroSys 2025); ACM
+
+## Build
+
+Download the llfree submodule.
+
+```sh
+git submodule update --init
+```
+
+Either use one of the provided configs under `build-*/.config` or enable the `CONFIG_LLFREE` option for LLFree `CONFIG_VIRTIO_LLFREE_BALLOON` for HyperAlloc (`make LLVM=1 menuconfig`).
 
 ```sh
 make O=build-llfree-vm LLVM=1 #...
 ```
 
+The paper uses the following configs:
+- `build-buddy-vm`: Minimal VM config without LLFree and HyperAlloc
+- `build-buddy-huge`: Minimal VM config with modified virtio-balloon to use huge pages
+- `build-llfree-vm`: Minimal VM config with LLFree and HyperAlloc
+
 ## Structure
 
 The llfree module can be found in [mm/llfree](mm/llfree).
-It consists of a rust library that uses the [llfree-rs](https://scm.sra.uni-hannover.de/research/llfree-rs) crate and a c wrapper.
+It contains the llfree allocator, which is used in [page_alloc.c](mm/page_alloc.c).
 
-## Problems
-
-- Please increase `KSYM_NAME_LEN` both in kernel and kallsyms.c
-- Non-allocatable sections: .llvmbc, .llvmcmd
-- Unknown sections: .text.__rust_probestack, .eh_frame
-
-## Support for printk
-
-The exported function `rust_fmt_argument` is a custom formatter for the rust print formatting.
-It has to be called in `lib/vsprintf.c:pointer` for the `%pA` format argument:
-
-```c
-char *pointer(const char *fmt, char *buf, char *end, void *ptr,
-	      struct printf_spec spec)
-{
-    switch(*fmt) {
-// ...
-    case 'A':
-        return rust_fmt_argument(buf, end, ptr);
-// ...
-    }
-}
-```
-
-> Logging is automatically initialized with the allocator.
+The HyperAlloc driver is in [virtio_llfree_balloon.h](include/uapi/linux/virtio_llfree_balloon.h) and [virtio_llfree_balloon.c](drivers/virtio/virtio_llfree_balloon.c).
+The hypercalls for installing memory are issues in [page_alloc.c](mm/page_alloc.c).
 
 ## Testing Module
-An additional kernel module is available in drivers/test/automatic-llfree-balloon. It can be used to
-measure and test (multi-threaded) guest triggered auto-deflate.
+
+An additional kernel module is available in [drivers/test/automatic-llfree-balloon](drivers/test/automatic-llfree-balloon).
+It can be used to measure and test (multi-threaded) guest triggered auto-deflate.

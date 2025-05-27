@@ -707,6 +707,8 @@ enum zone_type {
 
 #define ASYNC_AND_SYNC 2
 
+struct llfree;
+
 struct zone {
 	/* Read-mostly fields */
 
@@ -734,8 +736,10 @@ struct zone {
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 #ifdef CONFIG_LLFREE
-	void *llfree_dirty;
-	void *llfree_zeroed;
+	struct llfree *llfree_dirty;
+#ifdef CONFIG_LLZERO
+	struct llfree *llfree_zeroed;
+#endif
 #endif
 	/*
 	 * the high and batch values are copied to individual pagesets for

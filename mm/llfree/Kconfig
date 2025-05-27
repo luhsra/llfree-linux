@@ -20,4 +20,37 @@ config LLFREE_FAST_FREE
 	help
 	  Skip struct page checks for higher order frees. This might break memory hotplugging.
 
+config LLZERO
+    bool "Zero pages asynchronously"
+    depends on LLFREE
+    help
+      Zero pages asynchronously in the background.
+
+config LLZERO_NT
+    bool "Zero pages with non-temporal stores"
+    depends on LLZERO
+    help
+      Use non-temporal stores to zero pages.
+
+config LLZERO_DELAY
+    int "Delay between zeroing calls"
+    depends on LLZERO
+    default 100000
+    help
+      Delay in microseconds between zeroing calls.
+
+config LLZERO_PERCENTAGE
+    int "Percentage of pages to zero"
+    depends on LLZERO
+    default 30
+    help
+      Percentage of pages to zero asynchronously.
+
+config LLZERO_PER_RUN
+    int "GiB to zero per run"
+    depends on LLZERO
+    default 2
+    help
+      Maximum amount of memory to zero per run in GiB.
+
 endmenu

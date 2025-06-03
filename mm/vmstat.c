@@ -1109,18 +1109,35 @@ static void fill_contig_page_info(struct zone *zone,
 						(order - suitable_order);
 	}
 #else
-	if (zone->llfree_dirty == NULL) {
-		info->free_pages = 0;
-		info->free_blocks_total = 0;
-		info->free_blocks_suitable = 0;
-		return;
+	info->free_pages = 0;
+	info->free_blocks_total = 0;
+	info->free_blocks_suitable = 0;
+
+#ifdef CONFIG_LLZERO
+	if (zone->llfree_zeroed != NULL) {
+		info->free_pages += llfree_free_frames(zone->llfree_zeroed);
+		info->free_blocks_total += info->free_pages;
+		info->free_blocks_suitable += info->free_pages >>
+					      suitable_order;
 	}
-	info->free_pages = llfree_free_frames(zone->llfree_dirty);
-	info->free_blocks_total = info->free_pages; // ignore this one...
-	info->free_blocks_suitable = info->free_pages >> suitable_order;
+#endif
+	if (zone->llfree_dirty != NULL) {
+		info->free_pages += llfree_free_frames(zone->llfree_dirty);
+		info->free_blocks_total += info->free_pages; // ignore...
+		info->free_blocks_suitable += info->free_pages >>
+					      suitable_order;
+	}
+
 	if (suitable_order >= HUGETLB_PAGE_ORDER) {
-		size_t free_huge = llfree_free_huge(zone->llfree_dirty);
-		info->free_blocks_suitable = free_huge >> (suitable_order - HUGETLB_PAGE_ORDER);
+		size_t free_huge = 0;
+#ifdef CONFIG_LLZERO
+		if (zone->llfree_zeroed)
+			free_huge += llfree_free_huge(zone->llfree_zeroed);
+#endif
+		if (zone->llfree_dirty)
+			free_huge += llfree_free_huge(zone->llfree_dirty);
+		info->free_blocks_suitable =
+			free_huge >> (suitable_order - HUGETLB_PAGE_ORDER);
 	}
 #endif
 }

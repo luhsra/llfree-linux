@@ -4120,17 +4120,20 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 {
 	struct page *page = NULL;
 	int cpu;
-	llfree_result_t res;
+	llfree_result_t res = llfree_err(LLFREE_ERR_MEMORY);
 	llflags_t llf = llflags(order);
 	llf.movable = *gfp_flags & __GFP_MOVABLE ? 1 : 0;
 
 	cpu = get_cpu();
-	res = llfree_get(zone->llfree_zeroed, cpu, llf);
-
+	if (*gfp_flags & __GFP_ZERO) {
+		res = llfree_get(zone->llfree_zeroed, cpu, llf);
+		// Clear __GFP_ZERO to avoid double zeroing
+		if (llfree_is_ok(res))
+			*gfp_flags &= ~__GFP_ZERO;
+	}
+	// Fallback to dirty pages if zeroed pages are not available or needed
 	if (res.error == LLFREE_ERR_MEMORY) {
 		res = llfree_get(zone->llfree_dirty, cpu, llf);
-	} else {
-		*gfp_flags &= ~__GFP_ZERO;
 	}
 
 	if (!llfree_is_ok(res)) {

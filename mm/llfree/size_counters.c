@@ -1,4 +1,3 @@
-#include "linux/types.h"
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <size_counters.h>
@@ -15,15 +14,30 @@ MODULE_DESCRIPTION("LLFree Size Counters");
 MODULE_AUTHOR("Lars Wrenger");
 
 #define ALLOCATION_LEN 100000000lu
-enum SC_KIND { SC_ALLOC = 0, SC_MOVABLE = 1, SC_FREE = 2, SC_KINDS };
+enum SC_KIND {
+	SC_FIXED,
+	SC_FIXED_ZERO,
+	SC_MOVABLE,
+	SC_MOVABLE_ZERO,
+	SC_FREE,
+	SC_KINDS
+};
+static const char *sc_kind_names[] = {
+	[SC_FIXED] = "k",	  [SC_FIXED_ZERO] = "kz", [SC_MOVABLE] = "m",
+	[SC_MOVABLE_ZERO] = "mz", [SC_FREE] = "f",
+};
+static_assert(ARRAY_SIZE(sc_kind_names) == SC_KINDS,
+	      "Number of sc_kind_names must match SC_KINDS");
 
 static int kind_from_flags(bool alloc, gfp_t flags)
 {
+	int kind;
 	if (!alloc)
 		return SC_FREE;
-	if (flags & ___GFP_MOVABLE)
-		return SC_MOVABLE;
-	return SC_ALLOC;
+	kind = (flags & __GFP_MOVABLE) ? SC_MOVABLE : SC_FIXED;
+	if (flags & __GFP_ZERO)
+		kind += 1;
+	return kind;
 }
 
 // Count different allocation sizes
@@ -38,7 +52,7 @@ static u32 *allocations = NULL;
 
 void size_counters_alloc(gfp_t flags, int order)
 {
-	if (size_counters_active) {
+	if (unlikely(size_counters_active)) {
 		int kind = kind_from_flags(true, flags);
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		sc->c[kind][order] += 1;
@@ -47,7 +61,7 @@ void size_counters_alloc(gfp_t flags, int order)
 }
 void size_counters_bulk_alloc(gfp_t flags, u64 inc)
 {
-	if (size_counters_active) {
+	if (unlikely(size_counters_active)) {
 		int kind = kind_from_flags(true, flags);
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		sc->c[kind][0] += inc;
@@ -56,7 +70,7 @@ void size_counters_bulk_alloc(gfp_t flags, u64 inc)
 }
 void size_counters_free(int order)
 {
-	if (size_counters_active) {
+	if (unlikely(size_counters_active)) {
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		sc->c[SC_FREE][order] += 1;
 		put_cpu_ptr(sc);
@@ -64,7 +78,7 @@ void size_counters_free(int order)
 }
 void size_counters_bulk_free(u64 inc)
 {
-	if (size_counters_active) {
+	if (unlikely(size_counters_active)) {
 		struct size_counters *sc = get_cpu_ptr(&size_counters);
 		sc->c[SC_FREE][0] += inc;
 		put_cpu_ptr(sc);
@@ -73,7 +87,7 @@ void size_counters_bulk_free(u64 inc)
 
 void size_counters_trace(bool alloc, gfp_t flags, int order, size_t pfn)
 {
-	if (size_counters_active && allocations) {
+	if (unlikely(size_counters_active && allocations)) {
 		int kind = kind_from_flags(alloc, flags);
 		long idx = atomic_long_fetch_inc(&allocations_idx);
 		BUG_ON(idx >= ALLOCATION_LEN || pfn >= (1 << 24));
@@ -96,11 +110,12 @@ static ssize_t sc_trace_read(struct file *file, struct kobject *kobj,
 			     struct bin_attribute *bin_attr, char *buf,
 			     loff_t off, size_t len)
 {
+	size_t to_copy;
 	pr_info("read trace %lld %zu of %zu\n", off, len, bin_attr->size);
 	if (off > bin_attr->size)
 		return 0;
 
-	size_t to_copy = min(bin_attr->size - (size_t)off, PAGE_SIZE);
+	to_copy = min(bin_attr->size - (size_t)off, PAGE_SIZE);
 
 	if (allocations != NULL)
 		memcpy(buf, allocations + off, to_copy);
@@ -117,7 +132,6 @@ static struct bin_attribute bin_attr_sc_trace = {
 static ssize_t size_counters_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
-	char ops[] = { 'a', 'm', 'f' };
 	size_t len = 0;
 
 	// csv header
@@ -125,7 +139,7 @@ static ssize_t size_counters_show(struct kobject *kobj,
 		snprintf(buf + len, PAGE_SIZE - len, "op,order,count\n"));
 
 	// csv body
-	for (size_t kind = 0; kind < sizeof(ops) / sizeof(*ops); kind++) {
+	for (size_t kind = 0; kind < SC_KINDS; kind++) {
 		for (size_t order = 0; order < MAX_ORDER; order++) {
 			u64 count = 0;
 			size_t cpu;
@@ -136,9 +150,9 @@ static ssize_t size_counters_show(struct kobject *kobj,
 				count += sc->c[kind][order];
 			}
 
-			len += _check_ret(snprintf(buf + len, PAGE_SIZE - len,
-						   "%c,%zu,%llu\n", ops[kind],
-						   order, count));
+			len += _check_ret(snprintf(
+				buf + len, PAGE_SIZE - len, "%s,%zu,%llu\n",
+				sc_kind_names[kind], order, count));
 		}
 	}
 
@@ -147,7 +161,7 @@ static ssize_t size_counters_show(struct kobject *kobj,
 	return len;
 }
 
-ssize_t size_counters_store(struct kobject *kobj, struct kobj_attribute *attr,
+static ssize_t size_counters_store(struct kobject *kobj, struct kobj_attribute *attr,
 			    const char *buf, size_t count)
 {
 	if (buf == NULL || count == 0) {

@@ -4130,10 +4130,16 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		// Clear __GFP_ZERO to avoid double zeroing
 		if (llfree_is_ok(res))
 			*gfp_flags &= ~__GFP_ZERO;
-	}
-	// Fallback to dirty pages if zeroed pages are not available or needed
-	if (res.error == LLFREE_ERR_MEMORY) {
+		// Fallback to dirty pages if zeroed pages are not available or needed
+		else if (res.error == LLFREE_ERR_MEMORY) {
+			res = llfree_get(zone->llfree_dirty, cpu, llf);
+		}
+	} else {
 		res = llfree_get(zone->llfree_dirty, cpu, llf);
+		if (!llfree_is_ok(res)) {
+			// Fallback to zeroed pages if dirty pages are not available
+			res = llfree_get(zone->llfree_zeroed, cpu, llf);
+		}
 	}
 
 	if (!llfree_is_ok(res)) {

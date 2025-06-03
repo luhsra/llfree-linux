@@ -673,7 +673,10 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		goto release;
 	}
 
-	// clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+	// We instead use __GFP_ZERO directly!
+#ifndef CONFIG_LLZERO
+	clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+#endif
 	/*
 	 * The memory barrier inside __SetPageUptodate makes sure that
 	 * clear_huge_page writes become visible before the set_pmd_at()

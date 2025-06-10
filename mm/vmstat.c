@@ -1535,7 +1535,14 @@ static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 #ifdef CONFIG_LLFREE
 	{
 		size_t free_huge = llfree_free_huge(zone->llfree_dirty);
-		size_t free_small = llfree_free_frames(zone->llfree_dirty) - (free_huge << HUGETLB_PAGE_ORDER);
+		size_t free_small = llfree_free_frames(zone->llfree_dirty);
+#ifdef CONFIG_LLZERO
+		if (zone->llfree_zeroed) {
+			free_huge += llfree_free_huge(zone->llfree_zeroed);
+			free_small += llfree_free_frames(zone->llfree_zeroed);
+		}
+#endif
+		free_small -= free_huge << HUGETLB_PAGE_ORDER;
 
 		for (order = 0; order < MAX_ORDER; ++order) {
 			if (order == 0)

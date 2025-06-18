@@ -1336,19 +1336,13 @@ void __init mem_init_llfree(void)
 {
 	struct zone *zone;
 
-	for_each_populated_zone(zone) 
+	for_each_populated_zone(zone)
 	{
 		// init first allocator for dirty pages
-		zone->llfree_dirty = llfree_node_init(zone->node, num_possible_cpus(),
+		zone->llfree = llfree_node_init(zone->node, num_possible_cpus(),
 						zone->zone_start_pfn,
 						zone->spanned_pages);
-		BUG_ON(zone->llfree_dirty == NULL);
-		
-		// init second allocator for zeroed pages
-		zone->llfree_zeroed = llfree_node_init(zone->node, num_possible_cpus(),
-						zone->zone_start_pfn,
-						zone->spanned_pages);
-		BUG_ON(zone->llfree_zeroed == NULL);
+		BUG_ON(zone->llfree == NULL);
 	}
 }
 
@@ -1371,7 +1365,7 @@ void __init mem_init(void)
 		struct zone *zone;
 		int zid = 0;
 		for_each_populated_zone(zone) {
-			u64 num_pages = llfree_free_frames(zone->llfree_dirty);
+			u64 num_pages = llfree_free_frames(zone->llfree);
 			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
 			zid += 1;
 		}

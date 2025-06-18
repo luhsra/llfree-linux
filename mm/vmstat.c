@@ -1113,16 +1113,8 @@ static void fill_contig_page_info(struct zone *zone,
 	info->free_blocks_total = 0;
 	info->free_blocks_suitable = 0;
 
-#ifdef CONFIG_LLZERO
-	if (zone->llfree_zeroed != NULL) {
-		info->free_pages += llfree_free_frames(zone->llfree_zeroed);
-		info->free_blocks_total += info->free_pages;
-		info->free_blocks_suitable += info->free_pages >>
-					      suitable_order;
-	}
-#endif
-	if (zone->llfree_dirty != NULL) {
-		info->free_pages += llfree_free_frames(zone->llfree_dirty);
+	if (zone->llfree != NULL) {
+		info->free_pages += llfree_free_frames(zone->llfree);
 		info->free_blocks_total += info->free_pages; // ignore...
 		info->free_blocks_suitable += info->free_pages >>
 					      suitable_order;
@@ -1130,12 +1122,8 @@ static void fill_contig_page_info(struct zone *zone,
 
 	if (suitable_order >= HUGETLB_PAGE_ORDER) {
 		size_t free_huge = 0;
-#ifdef CONFIG_LLZERO
-		if (zone->llfree_zeroed)
-			free_huge += llfree_free_huge(zone->llfree_zeroed);
-#endif
-		if (zone->llfree_dirty)
-			free_huge += llfree_free_huge(zone->llfree_dirty);
+		if (zone->llfree)
+			free_huge += llfree_free_huge(zone->llfree);
 		info->free_blocks_suitable =
 			free_huge >> (suitable_order - HUGETLB_PAGE_ORDER);
 	}
@@ -1534,14 +1522,8 @@ static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 	seq_printf(m, "Node %d, zone %8s ", pgdat->node_id, zone->name);
 #ifdef CONFIG_LLFREE
 	{
-		size_t free_huge = llfree_free_huge(zone->llfree_dirty);
-		size_t free_small = llfree_free_frames(zone->llfree_dirty);
-#ifdef CONFIG_LLZERO
-		if (zone->llfree_zeroed) {
-			free_huge += llfree_free_huge(zone->llfree_zeroed);
-			free_small += llfree_free_frames(zone->llfree_zeroed);
-		}
-#endif
+		size_t free_huge = llfree_free_huge(zone->llfree);
+		size_t free_small = llfree_free_frames(zone->llfree);
 		free_small -= free_huge << HUGETLB_PAGE_ORDER;
 
 		for (order = 0; order < MAX_ORDER; ++order) {

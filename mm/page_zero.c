@@ -1,6 +1,8 @@
+#include "linux/kconfig.h"
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include "llfree.h"
+#include <linux/moduleparam.h>
 #include <linux/mmzone.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -10,94 +12,120 @@
 #include <linux/delay.h>
 
 #define LLFREE_HUGE_ORDER HUGETLB_PAGE_ORDER
-#define LLZERO_PER_RUN (CONFIG_LLZERO_PER_RUN << 30)
-#define LLZERO_PERCENT CONFIG_LLZERO_PERCENTAGE
-#define LLZERO_DELAY CONFIG_LLZERO_DELAY
 #define LLZERO_ZONEMASK ((1 << ZONE_NORMAL) | (1 << ZONE_DMA32))
 
+/// Percentage of pages to zero in a zone
+static unsigned int percentage = CONFIG_LLZERO_PERCENTAGE;
+/// Delay between zeroing runs [ms]
+static unsigned int delay = CONFIG_LLZERO_DELAY;
+/// Maximum amount of memory to zero in one run [MiB]
+static unsigned int limit = CONFIG_LLZERO_LIMIT;
+
+static inline size_t huge_page_limit(void)
+{
+	return ((limit * 1024 * 1024) / PAGE_SIZE) >> LLFREE_HUGE_ORDER;
+}
+
 extern void memset_nt(void *dst, int value, size_t len);
+
+static bool enabled = true;
 
 static struct task_struct **zero_tasks = NULL;
 static size_t zero_tasks_len = 0;
 
-static int zero_and_move_page(struct zone *zone, size_t order)
+/// Returns true if only zero percent was zeroed but there are still pages to zero.
+static bool llzero_pages(struct zone *zone)
 {
-	int cpu = get_cpu();
-	size_t total_pages = atomic_long_read(&zone->managed_pages);
-	size_t max_pages = (total_pages * LLZERO_PERCENT) / 100;
-	size_t zeroed_pages = llfree_free_frames(zone->llfree_zeroed);
-	ssize_t number_of_pages_to_zero = max_pages - zeroed_pages;
-	// Ensure we do not zero more than LLZERO_PER_RUN
-	number_of_pages_to_zero = min_t(ssize_t, number_of_pages_to_zero,
-					LLZERO_PER_RUN / PAGE_SIZE);
-	number_of_pages_to_zero /= (1 << order);
+	size_t pages_to_zero;
 
-	for (int i = 0; i < number_of_pages_to_zero; i++) {
+	size_t total_pages = llfree_huge(zone->llfree);
+	size_t zero_percentage = (total_pages * percentage) / 100;
+	size_t zeroed_pages = llfree_zeroed_huge(zone->llfree);
+	if (zeroed_pages >= zero_percentage)
+		return false;
+
+	// We want to keep a certain percentage of the zones pages zeroed
+	pages_to_zero = zero_percentage - zeroed_pages;
+	// Ensure we do not zero more than the limit
+	pages_to_zero = min_t(size_t, pages_to_zero, huge_page_limit());
+
+	for (size_t i = 0; i < pages_to_zero; i++) {
 		size_t offset =
 			ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 		struct page *page = NULL;
 		llfree_result_t res;
+		int cpu = get_cpu();
 
-		llflags_t llf = llflags(order);
-		llf.movable = 1;
-
-		res = llfree_get(zone->llfree_dirty, cpu, llf);
-		if (res.error) {
-			put_cpu();
-			return 1;
+		res = llfree_reclaim(zone->llfree, cpu, true, true);
+		put_cpu();
+		if (!llfree_is_ok(res)) {
+			if (i > 0 || res.error != LLFREE_ERR_MEMORY)
+				pr_info("Zeroed fail page %zu in zone %s: %d\n",
+					i, zone->name, res.error);
+			BUG_ON(res.error != LLFREE_ERR_MEMORY);
+			return false;
 		}
+		BUG_ON(res.zeroed);
 
 		page = pfn_to_page(offset + res.frame);
 #ifdef CONFIG_LLZERO_NT
-		memset_nt(page_address(page), 0, (1 << llf.order) * PAGE_SIZE);
+		memset_nt(page_address(page), 0,
+			  PAGE_SIZE << LLFREE_HUGE_ORDER);
 #else
-		__memset(page_address(page), 0, (1 << llf.order) * PAGE_SIZE);
+		__memset(page_address(page), 0, PAGE_SIZE << LLFREE_HUGE_ORDER);
 #endif
 
-		res = llfree_put(zone->llfree_zeroed, zone->llfree_dirty, cpu,
-				 res.frame, llflags(order));
-		BUG_ON(res.error);
+		res = llfree_return(zone->llfree, res.frame, true);
+		BUG_ON(!llfree_is_ok(res));
 	}
-	put_cpu();
-	return 0;
+	pr_info("Zeroed %zd pages in zone %s\n", pages_to_zero, zone->name);
+
+	return (zero_percentage - zeroed_pages) > pages_to_zero;
 }
 
-static int async_zero_fn(void *data)
+static int llzero_task(void *data)
 {
 	struct zone *zone = (struct zone *)data;
 
+#ifdef CONFIG_LLZERO_BENCH
 	ktime_t start, end;
 	bool once = true;
+#endif
+	usleep_range(delay, 4 * delay);
 
-	ssleep(10);
-
+#ifdef CONFIG_LLZERO_BENCH
 	start = ktime_get();
+#endif
 
 	while (!kthread_should_stop()) {
-		if (zero_and_move_page(zone, LLFREE_HUGE_ORDER) == 1) {
-			zero_and_move_page(zone, 0u);
-		}
+		bool zeroes_left = llzero_pages(zone);
+		// Sleep longer if there are no pages left to zero
+		size_t d = delay * (zeroes_left ? 1 : 4);
 
+#ifdef CONFIG_LLZERO_BENCH
 		if (once && (strcmp(zone->name, "Normal") == 0)) {
 			s64 delta;
 			end = ktime_get();
 			delta = ktime_to_ns(ktime_sub(end, start));
-			pr_info("First zeroing iteration in zone %s took: %lld ms\n",
-				zone->name, delta / 1000000);
+			pr_info("First zeroing %s took: %lld ms\n", zone->name,
+				delta / 1000000);
 			once = false;
 		}
+#endif
 
-		usleep_range(LLZERO_DELAY - LLZERO_DELAY / 10,
-			     LLZERO_DELAY + LLZERO_DELAY / 10);
+		usleep_range(d - (d / 10), d + (d / 10));
 	}
 	return 0;
 }
 
-static int __init async_zero_init(void)
+static int start_zero_tasks(void)
 {
 	size_t num_zones = 0;
-
 	struct zone *zone;
+
+	if (zero_tasks)
+		return 0;
+
 	for_each_populated_zone(zone) {
 		if ((1 << zone_idx(zone)) & LLZERO_ZONEMASK)
 			num_zones++;
@@ -111,7 +139,7 @@ static int __init async_zero_init(void)
 	for_each_populated_zone(zone) {
 		if ((1 << zone_idx(zone)) & LLZERO_ZONEMASK) {
 			zero_tasks[num_zones] = kthread_run(
-				async_zero_fn, (void *)zone, zone->name);
+				llzero_task, (void *)zone, zone->name);
 
 			if (IS_ERR(zero_tasks[num_zones])) {
 				pr_err("Failed to create zero task for zone %s\n",
@@ -122,29 +150,68 @@ static int __init async_zero_init(void)
 			num_zones++;
 		}
 	}
-
 	return 0;
 }
 
-static void __exit async_zero_exit(void)
+static int stop_zero_tasks(void)
 {
-	if (zero_tasks) {
-		for (size_t i = 0; i < zero_tasks_len; i++) {
-			if (zero_tasks[i]) {
-				kthread_stop(zero_tasks[i]);
-				pr_info("Zero task %zu stopped\n", i);
-				free_kthread_struct(zero_tasks[i]);
-			}
+	if (!zero_tasks)
+		return 0;
+
+	for (size_t i = 0; i < zero_tasks_len; i++) {
+		if (zero_tasks[i]) {
+			kthread_stop(zero_tasks[i]);
+			pr_info("Zero task %zu stopped\n", i);
+			free_kthread_struct(zero_tasks[i]);
 		}
-		kfree(zero_tasks);
-		zero_tasks = NULL;
-		zero_tasks_len = 0;
+	}
+	kfree(zero_tasks);
+	zero_tasks = NULL;
+	zero_tasks_len = 0;
+	return 0;
+}
+
+static int enabled_set(const char *val, const struct kernel_param *kp)
+{
+	int ret = param_set_bool(val, kp);
+	if (ret < 0)
+		return ret;
+
+	if (enabled) {
+		return start_zero_tasks();
+	} else {
+		return stop_zero_tasks();
 	}
 }
 
-module_init(async_zero_init);
-module_exit(async_zero_exit);
+static const struct kernel_param_ops enabled_ops = {
+	.set = enabled_set,
+	.get = param_get_bool,
+};
+
+module_param_cb(enabled, &enabled_ops, &enabled, 0664);
+
+module_param(percentage, uint, 0664);
+module_param(limit, uint, 0664);
+module_param(delay, uint, 0664);
+
+static int __init llzero_init(void)
+{
+	if (enabled)
+		return start_zero_tasks();
+	return 0;
+}
+
+static void __exit llzero_exit(void)
+{
+	int ret = stop_zero_tasks();
+	if (ret < 0)
+		pr_err("Failed to stop zero tasks: %d\n", ret);
+}
+
+module_init(llzero_init);
+module_exit(llzero_exit);
 
 MODULE_LICENSE("MIT");
-MODULE_AUTHOR("Henrik Cohrs");
-MODULE_DESCRIPTION("Pre zeros pages for later use.");
+MODULE_AUTHOR("Henrik Cohrs, Lars Wrenger <wrenger@sra.uni-hannover.de>");
+MODULE_DESCRIPTION("Zero pages asynchronously in the background.");

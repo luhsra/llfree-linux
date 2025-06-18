@@ -16,6 +16,7 @@
 #define PRId64 "lld"
 #define PRIuS "zu"
 #define PRIxS "zx"
+#define PRIdS "zd"
 
 /// Number of Bytes in cacheline
 #define LLFREE_CACHE_SIZE 64u
@@ -130,7 +131,7 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 			       (order));                                      \
 	})
 
-#define __c11_atomic_exchange(obj, val, order)                                \
+#define __c11_atomic_exchange(obj, val, order)                                  \
 	__extension__({                                                       \
 		__auto_type __atomic_exchange_ptr = (obj);                    \
 		__typeof__((void)0, *__atomic_exchange_ptr) __atomic_exchange_tmp = \
@@ -149,16 +150,15 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 /// Loop will end after len iterations.
 /// code will be executed in each loop.
 /// The current loop value can accessed by current_i
-#define for_offsetted(idx, len)                                   \
-	for (size_t _i = 0, _offset = (idx) % (len),              \
-		    _base_idx = (idx)-_offset, current_i = (idx); \
-	     _i < (len);                                          \
+#define for_offsetted(idx, len)                                     \
+	for (size_t _i = 0, _offset = (idx) % (len),                \
+		    _base_idx = (idx) - _offset, current_i = (idx); \
+	     _i < (len);                                            \
 	     _i = _i + 1, current_i = _base_idx + ((_i + _offset) % (len)))
 
 /// Checks if `obj` contains `expected` and writes `disired` to it if so.
 #define atom_cmp_exchange(obj, expected, desired)                       \
 	({                                                              \
-		llfree_debug("cmpxchg");                                \
 		__c11_atomic_compare_exchange_strong((obj), (expected), \
 						     (desired),         \
 						     ATOM_UPDATE_ORDER, \
@@ -167,29 +167,18 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 /// Checks if `obj` contains `expected` and writes `disired` to it if so.
 #define atom_cmp_exchange_weak(obj, expected, desired)                \
 	({                                                            \
-		llfree_debug("cmpxchg");                              \
 		__c11_atomic_compare_exchange_weak((obj), (expected), \
 						   (desired),         \
 						   ATOM_UPDATE_ORDER, \
 						   ATOM_LOAD_ORDER);  \
 	})
 
-#define atom_load(obj)                                   \
-	({                                               \
-		llfree_debug("load");                    \
-		__c11_atomic_load(obj, ATOM_LOAD_ORDER); \
-	})
-#define atom_store(obj, val)                                    \
-	({                                                      \
-		llfree_debug("store");                          \
-		__c11_atomic_store(obj, val, ATOM_STORE_ORDER); \
-	})
+#define atom_load(obj) ({ __c11_atomic_load(obj, ATOM_LOAD_ORDER); })
+#define atom_store(obj, val) \
+	({ __c11_atomic_store(obj, val, ATOM_STORE_ORDER); })
 
-#define atom_swap(obj, desired)                                        \
-	({                                                             \
-		llfree_debug("swap");                                   \
-		__c11_atomic_exchange(obj, desired, ATOM_UPDATE_ORDER); \
-	})
+#define atom_swap(obj, desired) \
+	({ __c11_atomic_exchange(obj, desired, ATOM_UPDATE_ORDER); })
 
 /// Atomic fetch-modify-update macro.
 ///
@@ -222,7 +211,6 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 #define atom_update(atom_ptr, old_val, fn, ...)                            \
 	({                                                                 \
 		/* NOLINTBEGIN */                                          \
-		llfree_debug("update");                                    \
 		bool _ret = false;                                         \
 		(old_val) = atom_load(atom_ptr);                           \
 		while (true) {                                             \

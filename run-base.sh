@@ -7,4 +7,5 @@ qemu-system-x86_64 -m 32G \
     -append 'root=/dev/sda3 console=ttyS0 nokaslr earlyprintk=ttyS0' \
     -nic user,hostfwd=tcp:127.0.0.1:5222-:22 \
     --cpu host,-rdtscp \
+    -s \
     $@

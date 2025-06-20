@@ -2,7 +2,7 @@
   description = "SRA flake for Linux kernel development";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/7c43f080a7f28b2774f3b3f43234ca11661bf334";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
   };
 
   outputs = { self, nixpkgs, ... }: let
@@ -10,7 +10,9 @@
                          "aarch64-darwin" "x86_64-darwin" ];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
   in {
-    devShells = forAllSystems (system: let pkgs = nixpkgs.legacyPackages.${system}; in {
+    devShells = forAllSystems (system: let
+      pkgs = nixpkgs.legacyPackages.${system};
+    in {
       default = pkgs.mkShellNoCC {
         buildInputs = with pkgs; [
           llvmPackages_20.clang

@@ -4127,9 +4127,14 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 
 	if (!llfree_is_ok(res)) {
 		put_cpu();
-		pr_err("llfree thread %u: error %d", current->pid, res.error);
-		pr_err("nr_free_pages left in zone: %li",
-		       atomic_long_read(&zone->vm_stat[NR_FREE_PAGES]));
+		if (res.error != LLFREE_ERR_MEMORY) {
+			pr_err("llfree pid=%u: error %d", current->pid,
+			       res.error);
+		} else if (order < HUGETLB_PAGE_ORDER) {
+			pr_err("llfree OOM: nr_free_pages zone=%s: %li",
+			       zone->name,
+			       atomic_long_read(&zone->vm_stat[NR_FREE_PAGES]));
+		}
 		BUG_ON(res.error != LLFREE_ERR_MEMORY);
 	} else {
 		size_t offset = ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);

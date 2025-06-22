@@ -59,9 +59,7 @@ static bool llzero_pages(struct zone *zone)
 		res = llfree_reclaim(zone->llfree, cpu, true, true);
 		put_cpu();
 		if (!llfree_is_ok(res)) {
-			if (i > 0 || res.error != LLFREE_ERR_MEMORY)
-				pr_info("Zeroed fail page %zu in zone %s: %d\n",
-					i, zone->name, res.error);
+			// Out of memory, we cannot zero more pages
 			BUG_ON(res.error != LLFREE_ERR_MEMORY);
 			return false;
 		}
@@ -91,7 +89,7 @@ static int llzero_task(void *data)
 	ktime_t start, end;
 	bool once = true;
 #endif
-	usleep_range(delay, 4 * delay);
+	usleep_range(delay, 8 * delay);
 
 #ifdef CONFIG_LLZERO_BENCH
 	start = ktime_get();
@@ -100,7 +98,7 @@ static int llzero_task(void *data)
 	while (!kthread_should_stop()) {
 		bool zeroes_left = llzero_pages(zone);
 		// Sleep longer if there are no pages left to zero
-		size_t d = delay * (zeroes_left ? 1 : 4);
+		size_t d = delay * (zeroes_left ? 1 : 8);
 
 #ifdef CONFIG_LLZERO_BENCH
 		if (once && (strcmp(zone->name, "Normal") == 0)) {
@@ -171,11 +169,15 @@ static int stop_zero_tasks(void)
 	return 0;
 }
 
+static bool initialized = false;
 static int enabled_set(const char *val, const struct kernel_param *kp)
 {
 	int ret = param_set_bool(val, kp);
 	if (ret < 0)
 		return ret;
+
+	if (!initialized)
+		return 0;
 
 	if (enabled) {
 		return start_zero_tasks();
@@ -197,6 +199,7 @@ module_param(delay, uint, 0664);
 
 static int __init llzero_init(void)
 {
+	initialized = true;
 	if (enabled)
 		return start_zero_tasks();
 	return 0;
@@ -207,6 +210,7 @@ static void __exit llzero_exit(void)
 	int ret = stop_zero_tasks();
 	if (ret < 0)
 		pr_err("Failed to stop zero tasks: %d\n", ret);
+	initialized = false;
 }
 
 module_init(llzero_init);

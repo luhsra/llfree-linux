@@ -1365,7 +1365,7 @@ void __init mem_init(void)
 		struct zone *zone;
 		int zid = 0;
 		for_each_populated_zone(zone) {
-			u64 num_pages = llfree_free_frames(zone->llfree);
+			u64 num_pages = llfree_stats(zone->llfree).free_frames;
 			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
 			zid += 1;
 		}

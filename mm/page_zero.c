@@ -36,17 +36,19 @@ static size_t zero_tasks_len = 0;
 /// Returns true if only zero percent was zeroed but there are still pages to zero.
 static bool llzero_pages(struct zone *zone)
 {
-	size_t pages_to_zero;
-
-	size_t total_pages = llfree_huge(zone->llfree);
-	size_t zero_percentage = (total_pages * percentage) / 100;
-	size_t zeroed_pages = llfree_zeroed_huge(zone->llfree);
-	if (zeroed_pages >= zero_percentage)
+	size_t pages_to_zero = 0;
+	ll_stats_t stats = llfree_stats(zone->llfree);
+	bool exceeds_limit = false;
+	// Zero X% of free pages
+	if (stats.free_huge <= 8)
 		return false;
+	pages_to_zero = stats.free_huge * percentage / 100;
+	if (pages_to_zero <= stats.zeroed_huge)
+		return false;
+	pages_to_zero -= stats.zeroed_huge;
 
-	// We want to keep a certain percentage of the zones pages zeroed
-	pages_to_zero = zero_percentage - zeroed_pages;
 	// Ensure we do not zero more than the limit
+	exceeds_limit = pages_to_zero > huge_page_limit();
 	pages_to_zero = min_t(size_t, pages_to_zero, huge_page_limit());
 
 	for (size_t i = 0; i < pages_to_zero; i++) {
@@ -78,7 +80,7 @@ static bool llzero_pages(struct zone *zone)
 	}
 	pr_info("Zeroed %zd pages in zone %s\n", pages_to_zero, zone->name);
 
-	return (zero_percentage - zeroed_pages) > pages_to_zero;
+	return exceeds_limit;
 }
 
 static int llzero_task(void *data)

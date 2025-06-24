@@ -78,7 +78,7 @@ static void frag_stop(struct seq_file *m, void *arg)
 {
 }
 
-static void writer(void *arg, char *str)
+static void writer(void *arg, const char *str)
 {
 	seq_printf((struct seq_file *)arg, "%s", str);
 }
@@ -112,10 +112,10 @@ static int llfree_frag_show(struct seq_file *m, void *arg)
 
 		for (size_t i = 0; i < llfree_frames(zone->llfree);
 		     i += 1 << LLFREE_HUGE_ORDER) {
-			size_t free = llfree_free_at(zone->llfree, i,
+			ll_stats_t stats = llfree_stats_at(zone->llfree, i,
 						     LLFREE_HUGE_ORDER);
 			// [0, 9], where 0 is entirely allocated and 9 is free
-			size_t level = free == 0 ? 0 : (free / 64 + 1);
+			size_t level = stats.free_frames == 0 ? 0 : (stats.free_frames / 64 + 1);
 			seq_printf(m, "%zu", level);
 		}
 		seq_printf(m, "\n");
@@ -190,7 +190,7 @@ static void llfree_cleanup_module(void)
 }
 module_exit(llfree_cleanup_module);
 
-EXPORT_SYMBOL(llfree_free_frames);
-EXPORT_SYMBOL(llfree_free_huge);
+EXPORT_SYMBOL(llfree_stats);
+EXPORT_SYMBOL(llfree_full_stats);
 // EXPORT_SYMBOL(llfree_dump);
 // EXPORT_SYMBOL(llfree_print);

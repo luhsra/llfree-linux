@@ -58,7 +58,7 @@ static bool llzero_pages(struct zone *zone)
 		llfree_result_t res;
 		int cpu = get_cpu();
 
-		res = llfree_reclaim(zone->llfree, cpu, true, true);
+		res = llfree_reclaim(zone->llfree, cpu, true, true, true);
 		put_cpu();
 		if (!llfree_is_ok(res)) {
 			// Out of memory, we cannot zero more pages
@@ -99,8 +99,11 @@ static int llzero_task(void *data)
 
 	while (!kthread_should_stop()) {
 		bool zeroes_left = llzero_pages(zone);
+
 		// Sleep longer if there are no pages left to zero
 		size_t d = delay * (zeroes_left ? 1 : 8);
+		// TODO: Remove this check!
+		// llfree_validate(zone->llfree);
 
 #ifdef CONFIG_LLZERO_BENCH
 		if (once && (strcmp(zone->name, "Normal") == 0)) {

@@ -131,30 +131,19 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 			       (order));                                      \
 	})
 
-#define __c11_atomic_exchange(obj, val, order)                                  \
-	__extension__({                                                       \
-		__auto_type __atomic_exchange_ptr = (obj);                    \
-		__typeof__((void)0, *__atomic_exchange_ptr) __atomic_exchange_tmp = \
-			(val);                                                \
-		__atomic_exchange(__atomic_exchange_ptr, &__atomic_exchange_tmp, \
-				   &__atomic_exchange_tmp, (order));            \
-		__atomic_exchange_tmp;                                        \
-	}
+#define __c11_atomic_exchange(obj, val, order)                             \
+	__extension__({                                                    \
+		__auto_type __atomic_exchange_ptr = (obj);                 \
+		__typeof__((void)0,                                        \
+			   *__atomic_exchange_ptr) __atomic_exchange_tmp = \
+			(val);                                             \
+		__atomic_exchange(__atomic_exchange_ptr,                   \
+				  &__atomic_exchange_tmp,                  \
+				  &__atomic_exchange_tmp, (order));        \
+		__atomic_exchange_tmp;                                     \
+	})
 
 #endif
-
-/// Iterates over a Range between multiples of len starting at idx.
-///
-/// Starting at idx up to the next Multiple of len (exclusive). Then the next
-/// step will be the highest multiple of len less than idx. (_base_idx)
-/// Loop will end after len iterations.
-/// code will be executed in each loop.
-/// The current loop value can accessed by current_i
-#define for_offsetted(idx, len)                                     \
-	for (size_t _i = 0, _offset = (idx) % (len),                \
-		    _base_idx = (idx) - _offset, current_i = (idx); \
-	     _i < (len);                                            \
-	     _i = _i + 1, current_i = _base_idx + ((_i + _offset) % (len)))
 
 /// Checks if `obj` contains `expected` and writes `disired` to it if so.
 #define atom_cmp_exchange(obj, expected, desired)                       \

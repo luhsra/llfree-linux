@@ -4143,6 +4143,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		if (res.reclaimed) {
 #ifdef CONFIG_VIRTIO_LLFREE_BALLOON
 			ll_request_install(zone, res.frame, cpu);
+			res.zeroed = true; // Returned pages are zeroed by the host
 #else
 			VM_BUG_ON_PAGE(true, page); // No auto deflation!
 #endif

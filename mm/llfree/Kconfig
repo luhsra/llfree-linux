@@ -24,13 +24,22 @@ config LLZERO
 	bool "Zero pages asynchronously"
 	depends on LLFREE
 
-config LLZERO_BENCH
-	bool "Measure zeroing performance"
-	depends on LLZERO
-
 config LLZERO_NT
 	bool "Zero pages with non-temporal stores"
 	depends on LLZERO
+
+config LLZERO_NVME_DEBUG
+	bool "Debug nulling address using hexdump"
+	depends on LLZERO
+	help
+	  Hexdump the nulled address after the DMA is completed
+
+config LLZERO_IODEPTH
+	int "NVMe: Max I/O Inflight"
+	depends on LLZERO
+	default 64
+	help
+	  Max I/O Inflight
 
 config LLZERO_DELAY
 	int "Delay between zeroing calls"

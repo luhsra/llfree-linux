@@ -469,8 +469,6 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 
 	atomic_set(&completion_ctr, 0);
 
-	// FIXME: kernel oops when running the benchmark..
-	// kernel NULL pointer deref. Why?
 	bench_pages = kcalloc(bench_num_pages, sizeof(u64), GFP_KERNEL);
 	for (int i = 0; i < bench_num_pages; i++) {
 		llfree_result_t res = llfree_get(bench_zone->llfree, cpu, llf);
@@ -489,6 +487,7 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 		if (!issued) {
 			size_t d = delay;
 			usleep_range(d - (d / 10), d + (d / 10));
+			i--;
 		}
 	}
 

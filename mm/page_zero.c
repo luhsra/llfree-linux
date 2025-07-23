@@ -453,7 +453,8 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 			break;
 		}
 	}
-	cpu = __smp_processor_id();
+	cpu = get_cpu();
+	put_cpu();
 
 	bench_cpu = cpu;
 	bench_num_pages = args.num_pages;
@@ -468,8 +469,8 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 
 	atomic_set(&completion_ctr, 0);
 
-	// allocate llfree results
-	// INIT_KFIFO(bench_jobs);
+	// FIXME: kernel oops when running the benchmark..
+	// kernel NULL pointer deref. Why?
 	bench_pages = kcalloc(bench_num_pages, sizeof(u64), GFP_KERNEL);
 	for (int i = 0; i < bench_num_pages; i++) {
 		llfree_result_t res = llfree_get(bench_zone->llfree, cpu, llf);

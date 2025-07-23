@@ -93,6 +93,7 @@ static struct class *cls;
 static struct bio_set bs;
 #define LLZERO_BIO_POOL_SIZE 10
 
+static uint32_t module_id = 0xdeadbeef;
 static atomic_t blk_2mib_ctr = ATOMIC_INIT(0);
 #define BLK_2MIB_COUNT 512
 #define SECTOR_OFFSET_2MIB 4096
@@ -367,7 +368,8 @@ static bool llzero_pages(struct zone *zone, bool ssd)
 			return true;
 	}
 	if (pages_to_zero > 0)
-		pr_info("Zeroed %zd pages in zone %s\n", pages_to_zero, zone->name);
+		pr_info("Zeroed %zd pages in zone %s\n", pages_to_zero,
+			zone->name);
 
 	return exceeds_limit;
 }
@@ -390,6 +392,8 @@ static int llzero_task(void *data)
 
 static int device_set(const char *val, const struct kernel_param *kp)
 {
+	u32 pos_newline;
+	char dev_name[128];
 	int res = param_set_charp(val, kp);
 	if (res < 0) {
 		pr_err("Failed to set device: %s\n", val);
@@ -407,10 +411,14 @@ static int device_set(const char *val, const struct kernel_param *kp)
 		pr_info("No device specified, using cpu.\n");
 		return 0;
 	}
-	bdev = blkdev_get_by_path(val, mode, THIS_MODULE);
+	pos_newline = strlen(val) - 1;
+	strcpy(dev_name, val);
+	dev_name[pos_newline] = '\0';
+	pr_info("%s\n", dev_name);
+	bdev = blkdev_get_by_path(dev_name, mode, &module_id);
 	if (IS_ERR(bdev)) {
 		int err = PTR_ERR(bdev);
-		pr_err("Failed to open block device %s: %d\n", val, err);
+		pr_err("Failed to open block device %s: %d\n", dev_name, err);
 		bdev = NULL;
 		return err;
 	}

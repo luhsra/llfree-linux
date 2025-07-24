@@ -70,7 +70,7 @@ static bool enabled = true;
 static struct task_struct **zero_tasks = NULL;
 static size_t zero_tasks_len = 0;
 
-static char *device = NULL;
+static char device[128] = { '\0' };
 static struct block_device *bdev = NULL;
 
 static fmode_t mode = FMODE_READ | FMODE_EXCL;
@@ -392,13 +392,12 @@ static int llzero_task(void *data)
 
 static int device_set(const char *val, const struct kernel_param *kp)
 {
-	u32 pos_newline;
-	char dev_name[128];
-	int res = param_set_charp(val, kp);
-	if (res < 0) {
-		pr_err("Failed to set device: %s\n", val);
-		return res;
-	}
+	// Find newline or null terminator
+	const char* end = strnchrnul(val, sizeof(device) - 1, '\n');
+	size_t len = end - val;
+	strncpy(device, val, len);
+	device[len] = '\0';
+
 	if (bdev != NULL) {
 		// Wait for all bios to finish
 		while (atomic_read(&bio_inflight) != 0) {
@@ -407,23 +406,19 @@ static int device_set(const char *val, const struct kernel_param *kp)
 		blkdev_put(bdev, mode);
 		bdev = NULL;
 	}
-	if (*val == '\0') {
+	if (len == 0) {
 		pr_info("No device specified, using cpu.\n");
 		return 0;
 	}
-	pos_newline = strlen(val) - 1;
-	strcpy(dev_name, val);
-	dev_name[pos_newline] = '\0';
-	pr_info("%s\n", dev_name);
-	bdev = blkdev_get_by_path(dev_name, mode, &module_id);
+	bdev = blkdev_get_by_path(device, mode, &module_id);
 	if (IS_ERR(bdev)) {
 		int err = PTR_ERR(bdev);
-		pr_err("Failed to open block device %s: %d\n", dev_name, err);
+		pr_err("Failed to open block device %s: %d\n", device, err);
 		bdev = NULL;
 		return err;
 	}
-	pr_info("Opened block device %s\n", val);
-	return res;
+	pr_info("Opened block device %s\n", device);
+	return 0;
 }
 
 static long async_zero_ioctl(struct file *filp, unsigned int cmd,

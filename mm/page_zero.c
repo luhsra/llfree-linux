@@ -438,6 +438,14 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 		pr_err("Invalid ioctl command: %u\n", cmd);
 		return -EINVAL;
 	}
+	if (enabled) {
+		pr_err("Cannot run benchmark zeroing is enabled.\n");
+		return -EINVAL;
+	}
+	if (bench_num_pages > 0) {
+		pr_err("Cannot run benchmark while another is running.\n");
+		return -EBUSY;
+	}
 	if (copy_from_user(&args, argp, sizeof(args))) {
 		return -EFAULT;
 	}
@@ -456,11 +464,6 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 
 	iodepth = args.iodepth;
 	bench_const_sector = args.const_iosector;
-
-	if (enabled) {
-		pr_err("Cannot run benchmark zeroing is enabled.\n");
-		return -EINVAL;
-	}
 
 	atomic_set(&completion_ctr, 0);
 
@@ -493,10 +496,6 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 
 	args.duration_ns = ktime_to_ns(ktime_sub(end, start));
 
-	if (copy_to_user(argp, &args, sizeof(args))) {
-		return -EFAULT;
-	}
-
 	// Free llfree results
 	for (int i = 0; i < bench_num_pages; i++) {
 		llfree_result_t res;
@@ -504,6 +503,7 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 		BUG_ON(!llfree_is_ok(res));
 	}
 	kfree(bench_pages);
+	bench_num_pages = 0;
 
 	atomic_set(&completion_ctr, 0);
 	iodepth = CONFIG_LLZERO_IODEPTH;

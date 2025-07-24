@@ -393,7 +393,7 @@ static int llzero_task(void *data)
 static int device_set(const char *val, const struct kernel_param *kp)
 {
 	// Find newline or null terminator
-	const char* end = strnchrnul(val, sizeof(device) - 1, '\n');
+	const char *end = strnchrnul(val, sizeof(device) - 1, '\n');
 	size_t len = end - val;
 	strncpy(device, val, len);
 	device[len] = '\0';
@@ -479,9 +479,11 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 
 	// start zeroing operation
 	for (int i = 0; i < bench_num_pages; i++) {
-		// TODO: Support cpu zeroing
-		bool issued = llzero_page_ssd(bench_zone,
-					      optional_size(bench_pages[i]));
+		bool issued =
+			bdev ? llzero_page_ssd(bench_zone,
+					       optional_size(bench_pages[i])) :
+			       llzero_page_cpu(bench_zone,
+					       optional_size(bench_pages[i]));
 		if (!issued) {
 			size_t d = delay;
 			usleep_range(d - (d / 10), d + (d / 10));
@@ -492,9 +494,12 @@ static long async_zero_ioctl(struct file *filp, unsigned int cmd,
 	wait_event(bench_waitq,
 		   atomic_read(&completion_ctr) == bench_num_pages);
 	end = ktime_get();
-	pr_info("benchmark done.\n");
 
 	args.duration_ns = ktime_to_ns(ktime_sub(end, start));
+	pr_info("benchmark done %lld.\n", args.duration_ns);
+	if (copy_to_user(argp, &args, sizeof(args))) {
+		pr_err("Failed to copy benchmark args to user space.\n");
+	}
 
 	// Free llfree results
 	for (int i = 0; i < bench_num_pages; i++) {

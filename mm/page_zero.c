@@ -213,7 +213,7 @@ static void bio_end_io(struct bio *bio)
 		/* 		 ctx->cpu, ctx->frame, llflags(ctx->order)); */
 	} else {
 		// Free the entire huge page
-		res = llfree_return(zone->llfree, res.frame, true);
+		res = llfree_return(zone->llfree, ctx->frame, true);
 		BUG_ON(res.error);
 	}
 

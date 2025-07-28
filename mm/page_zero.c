@@ -392,11 +392,13 @@ static int llzero_task(void *data)
 
 static int device_set(const char *val, const struct kernel_param *kp)
 {
+	int res;
+	char dev_name[128];
 	// Find newline or null terminator
-	const char *end = strnchrnul(val, sizeof(device) - 1, '\n');
+	const char *end = strnchrnul(val, sizeof(dev_name) - 1, '\n');
 	size_t len = end - val;
-	strncpy(device, val, len);
-	device[len] = '\0';
+	strncpy(dev_name, val, len);
+	dev_name[len] = '\0';
 
 	if (bdev != NULL) {
 		// Wait for all bios to finish
@@ -407,17 +409,23 @@ static int device_set(const char *val, const struct kernel_param *kp)
 		bdev = NULL;
 	}
 	if (len == 0) {
-		pr_info("No device specified, using cpu.\n");
+		pr_info("No dev_name specified, using cpu.\n");
 		return 0;
 	}
-	bdev = blkdev_get_by_path(device, mode, &module_id);
+	bdev = blkdev_get_by_path(dev_name, mode, &module_id);
 	if (IS_ERR(bdev)) {
 		int err = PTR_ERR(bdev);
-		pr_err("Failed to open block device %s: %d\n", device, err);
+		pr_err("Failed to open block dev_name %s: %d\n", dev_name, err);
 		bdev = NULL;
 		return err;
 	}
-	pr_info("Opened block device %s\n", device);
+	pr_info("Opened block device %s\n", dev_name);
+
+	res = param_set_charp(dev_name, kp);
+	if (res < 0) {
+		pr_err("Failed to set device: %s\n", val);
+		return res;
+	}
 	return 0;
 }
 

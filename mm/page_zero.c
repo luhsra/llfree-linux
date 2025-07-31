@@ -78,11 +78,9 @@ static fmode_t mode = FMODE_READ | FMODE_EXCL;
 struct bio_ctx {
 	struct zone *zone;
 	uint64_t frame;
-	size_t order;
-	size_t cpu;
-	size_t offset;
 	bool benchmark;
 #ifdef CONFIG_LLZERO_NVME_DEBUG
+	size_t offset;
 	ktime_t start;
 #endif
 };
@@ -209,8 +207,6 @@ static void bio_end_io(struct bio *bio)
 			pr_info("Benchmark completed: %zu ops\n",
 				bench_num_pages);
 		}
-		/* res = llfree_put(zone->llfree_dirty, zone->llfree_dirty, */
-		/* 		 ctx->cpu, ctx->frame, llflags(ctx->order)); */
 	} else {
 		// Free the entire huge page
 		res = llfree_return(zone->llfree, ctx->frame, true);
@@ -305,9 +301,6 @@ static bool llzero_page_ssd(struct zone *zone, optional_size_t bench_frame)
 	ctx = kzalloc(sizeof(struct bio_ctx), GFP_KERNEL);
 	ctx->zone = zone;
 	ctx->frame = res.frame;
-	ctx->order = HUGETLB_PAGE_ORDER;
-	ctx->cpu = cpu;
-	ctx->offset = offset;
 	ctx->benchmark = bench_frame.present;
 
 	if (bench_const_sector) {
@@ -332,10 +325,8 @@ static bool llzero_page_ssd(struct zone *zone, optional_size_t bench_frame)
 		kfree(ctx);
 		bio_put(bio);
 		if (!bench_frame.present) {
-			llfree_result_t res2;
-			res2 = llfree_put(zone->llfree, 0, res.frame,
-					  llflags(HUGETLB_PAGE_ORDER));
-			BUG_ON(res2.error);
+			res = llfree_return(zone->llfree, res.frame, true);
+			BUG_ON(res.error);
 		}
 		atomic_dec(&bio_inflight);
 		return false;
@@ -344,6 +335,7 @@ static bool llzero_page_ssd(struct zone *zone, optional_size_t bench_frame)
 #ifdef CONFIG_LLZERO_NVME_DEBUG
 	start = ktime_get();
 	ctx->start = start;
+	ctx->offset = offset;
 #endif
 
 	submit_bio(bio);

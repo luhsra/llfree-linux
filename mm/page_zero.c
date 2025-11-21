@@ -49,7 +49,7 @@ static inline size_t huge_page_limit(void)
 static inline size_t num_pages_to_zero(struct zone *zone)
 {
 	size_t pages_to_zero = 0;
-	ll_stats_t stats = llfree_stats(zone->llfree);
+	ll_stats_t stats = llfree_full_stats(zone->llfree);
 	// Zero X% of free pages
 	if (stats.free_huge <= 8)
 		return 0;

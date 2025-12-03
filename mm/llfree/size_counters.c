@@ -280,6 +280,7 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 			      struct bin_attribute *bin_attr, char *buf,
 			      loff_t off, size_t len)
 {
+	size_t cpu;
 	uint8_t *input = (uint8_t *)buf;
 	if (len < 1) {
 		pr_err("Invalid input\n");
@@ -303,7 +304,6 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 		// reset trace state
 		atomic_long_set(&alloc_page_idx, 0);
 		bin_attr->size = 0;
-		size_t cpu;
 		for_each_possible_cpu(cpu) {
 			struct reserved_alloc_entry *entry =
 				per_cpu_ptr(&alloc_entry_local, cpu);
@@ -316,13 +316,13 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 		return len;
 
 	} else if (input[0] == '0') {
+		size_t pages = atomic_long_read(&alloc_page_idx) + 1;
 		pr_info("stop trace\n");
 		if (!alloc_trace_active) {
 			pr_err("Trace not started\n");
 			return -EINVAL;
 		}
 
-		size_t pages = atomic_long_read(&alloc_page_idx) + 1;
 		pr_info("Buffer used pages: %ld => %ld\n", pages,
 			pages * PAGE_SIZE);
 

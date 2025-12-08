@@ -1110,7 +1110,7 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
-	size_counters_trace(false, 0, order, frame);
+	size_counters_trace(false, 0, order, page_to_pfn(page));
 	put_cpu();
 	if (!llfree_is_ok(ret)) {
 		pr_err("llfree: err %u", ret.error);
@@ -1135,8 +1135,9 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 	BUG_ON(frame < 0);
 
 	cpu = get_cpu();
-	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
-	size_counters_trace(false, 0, order, frame);
+	// TODO: Is this even correct for llfree? Looks more like an alloc?
+	ret = llfree_get_at(zone->llfree, cpu, frame, llflags(order));
+	size_counters_trace(true, 0, order, page_to_pfn(page));
 	put_cpu();
 
 	if (!llfree_is_ok(ret)) {
@@ -1191,8 +1192,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 
 	VM_BUG_ON(zone->llfree == NULL);
 
-	frame = page_to_pfn(page) -
-		    ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
+	frame = pfn - ALIGN_DOWN(zone->zone_start_pfn, 1 << MAX_ORDER);
 	BUG_ON(frame < 0);
 
 	cpu = get_cpu();
@@ -1201,7 +1201,7 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
 	ret = llfree_put(zone->llfree, cpu, frame, llflags(order));
-	size_counters_trace(false, 0, order, frame);
+	size_counters_trace(false, 0, order, pfn);
 	put_cpu();
 
 	if (!llfree_is_ok(ret)) {
@@ -4155,7 +4155,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 		__mod_zone_freepage_state(zone, -(1 << order), migratetype);
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
 		zone_statistics(preferred_zone, zone, 1);
-		size_counters_trace(true, *gfp_flags, order, offset + res.frame);
+		size_counters_trace(true, *gfp_flags, order, page_to_pfn(page));
 		put_cpu();
 	}
 

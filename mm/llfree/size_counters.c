@@ -2,6 +2,7 @@
 
 #include <size_counters.h>
 
+#include <linux/vmalloc.h>
 #include <linux/printk.h>
 #include <linux/gfp.h>
 #include <linux/kobject.h>
@@ -182,34 +183,35 @@ static struct kobject *size_counters_obj;
 static bool alloc_trace_active = false;
 
 /// Allocation trace
-struct alloc_entry {
-	// 1/10 seconds since boot, up to ~109min
-	u64 time_s_10 : 16;
+struct [[gnu::packed]] alloc_entry {
+	// microseconds since boot, up to ~4500 hours
+	u64 time_us : 38;
+	// 32 GiB worth of pages + padding
+	u32 pfn : 24;
 	// is allocation
-	u64 alloc : 1;
-	// is huge page (order >= 9)
-	u64 is_huge : 1;
-
-	// 23 is enough in our config without ksan
-	u64 flags : 23;
-	// 16 GiB worth of pages
-	u64 pfn : 23;
+	u32 alloc : 1;
+	// allocation size [0..=10]
+	u32 order : 4;
+	// MAX 29 bits with all enabled
+	u32 flags : 29;
 };
+static_assert(sizeof(struct alloc_entry) == 12, "alloc_entry size incorrect");
+static_assert(__GFP_BITS_SHIFT <= 29,
+	      "__GFP_BITS_SHIFT too large for alloc_entry flags");
+
 static inline struct alloc_entry alloc_entry_new(bool alloc, gfp_t flags,
 						 int order, size_t pfn)
 {
 	BUG_ON(order < 0 || order >= MAX_ORDER);
-	BUG_ON(pfn >= (1 << 23));
-	BUG_ON(flags >= (1 << 23));
-	// maybe reduce pfn to zone offset?
-
+	BUG_ON(pfn >= (1 << 24));
+	BUG_ON(flags >= (1 << 29));
+	BUG_ON(order >= MAX_ORDER);
 	return (struct alloc_entry){
-		// fmt
-		.time_s_10 = ktime_get_mono_fast_ns() / (NSEC_PER_SEC / 10),
+		.time_us = ktime_get_ns() / 1000,
+		.pfn = pfn,
+		.alloc = alloc,
+		.order = order,
 		.flags = flags,
-		.alloc = alloc ? 1 : 0,
-		.is_huge = order >= 9 ? 1 : 0,
-		.pfn = pfn
 	};
 }
 
@@ -217,14 +219,15 @@ static inline struct alloc_entry alloc_entry_new(bool alloc, gfp_t flags,
 
 /// Page of allocation entries, reserved per cpu
 struct alloc_entry_page {
+	u32 cpuid;
 	struct alloc_entry entries[ALLOC_ENTRY_PER_PAGE];
 } __aligned(PAGE_SIZE);
 
 /// Shared index into the allocation trace buffer
 static atomic_long_t alloc_page_idx = ATOMIC_LONG_INIT(0);
 
-/// Preallocated buffer size: 1 GiB
-#define ALLOC_PAGES_LEN ((1ULL << 30ULL) / PAGE_SIZE)
+/// Preallocated buffer size: 2 GiB
+#define ALLOC_PAGES_LEN ((2ULL << 30ULL) / PAGE_SIZE)
 /// Buffer for allocation trace, NULL if tracing is disabled
 static struct alloc_entry_page *alloc_pages_buf = NULL;
 
@@ -247,6 +250,7 @@ void size_counters_trace(bool alloc, gfp_t flags, int order, size_t pfn)
 			BUG_ON(alloc_pages_buf == NULL);
 			BUG_ON(page_idx >= ALLOC_PAGES_LEN);
 			entry->page = &alloc_pages_buf[page_idx];
+			entry->page->cpuid = smp_processor_id();
 			entry->entry_idx = 0;
 		}
 		entry->page->entries[entry->entry_idx++] =
@@ -296,8 +300,7 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 		if (alloc_pages_buf != NULL)
 			kvfree(alloc_pages_buf);
 
-		alloc_pages_buf =
-			kvcalloc(ALLOC_PAGES_LEN, PAGE_SIZE, GFP_KERNEL);
+		alloc_pages_buf = vzalloc(ALLOC_PAGES_LEN * PAGE_SIZE);
 		BUG_ON(alloc_pages_buf == NULL);
 		BUG_ON(((size_t)alloc_pages_buf) % PAGE_SIZE != 0);
 

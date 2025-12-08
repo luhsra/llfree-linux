@@ -869,7 +869,7 @@ noinline int __filemap_add_folio(struct address_space *mapping,
 
 		if (order > folio_order(folio))
 			xas_split_alloc(&xas, xa_load(xas.xa, xas.xa_index),
-					order, gfp);
+					order, gfp); // <- is this allocation used as page cache page?
 		xas_lock_irq(&xas);
 		xas_for_each_conflict(&xas, entry) {
 			old = entry;
@@ -963,12 +963,12 @@ struct folio *filemap_alloc_folio(gfp_t gfp, unsigned int order)
 		do {
 			cpuset_mems_cookie = read_mems_allowed_begin();
 			n = cpuset_mem_spread_node();
-			folio = __folio_alloc_node(gfp, order, n);
+			folio = __folio_alloc_node(gfp | ___GFP_PAGE_CACHE, order, n); // <- is this a page cache page?
 		} while (!folio && read_mems_allowed_retry(cpuset_mems_cookie));
 
 		return folio;
 	}
-	return folio_alloc(gfp, order);
+	return folio_alloc(gfp | ___GFP_PAGE_CACHE, order); // <- is this a page cache page?
 }
 EXPORT_SYMBOL(filemap_alloc_folio);
 #endif

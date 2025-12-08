@@ -60,6 +60,12 @@ typedef unsigned int __bitwise gfp_t;
 #else
 #define ___GFP_NOLOCKDEP	0
 #endif
+/* Encode page cache */
+#ifdef CONFIG_LLFREE_PAGE_CACHE
+#define ___GFP_PAGE_CACHE		0x10000000u
+#else
+#define ___GFP_PAGE_CACHE		0
+#endif
 
 /* If the above are modified, __GFP_BITS_SHIFT may need updating */
 
@@ -257,7 +263,11 @@ typedef unsigned int __bitwise gfp_t;
 #define __GFP_NOLOCKDEP ((__force gfp_t)___GFP_NOLOCKDEP)
 
 /* Room for N __GFP_FOO bits */
+#ifdef CONFIG_LLFREE_PAGE_CACHE
+#define __GFP_BITS_SHIFT 29
+#else
 #define __GFP_BITS_SHIFT (27 + IS_ENABLED(CONFIG_LOCKDEP))
+#endif
 #define __GFP_BITS_MASK ((__force gfp_t)((1 << __GFP_BITS_SHIFT) - 1))
 
 /**

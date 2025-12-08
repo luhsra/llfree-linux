@@ -27,7 +27,7 @@ void noinline llfree_panic(void)
 llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
-	cores = 1; // only one core for now
+	cores = num_online_cpus();
 
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length

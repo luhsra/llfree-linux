@@ -4117,13 +4117,10 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 {
 	struct page *page = NULL;
 	int cpu;
-	llfree_result_t res = llfree_err(LLFREE_ERR_MEMORY);
-	llflags_t llf = llflags(order);
-	llf.movable = *gfp_flags & __GFP_MOVABLE ? 1 : 0;
-	llf.zeroed = *gfp_flags & __GFP_ZERO ? 1 : 0;
+	llfree_result_t res;
 
 	cpu = get_cpu();
-	res = llfree_get(zone->llfree, cpu, llf);
+	res = llfree_get(zone->llfree, cpu, llflags_gfp(*gfp_flags, order));
 
 	if (!llfree_is_ok(res)) {
 		put_cpu();

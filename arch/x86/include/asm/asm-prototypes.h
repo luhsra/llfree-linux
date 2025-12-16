@@ -17,3 +17,7 @@
 extern void cmpxchg8b_emu(void);
 #endif
 
+#ifdef CONFIG_LLZERO_NT
+#undef memset_nt
+extern void *memset_nt(void *, int, __kernel_size_t);
+#endif

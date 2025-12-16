@@ -5,9 +5,10 @@
 #include <linux/mmzone.h>
 #include <linux/scatterlist.h>
 
+unsigned int get_page_reporting_capacity(void);
+
 /* This value should always be a power of 2, see page_reporting_cycle() */
-extern unsigned int page_reporting_capacity;
-#define PAGE_REPORTING_CAPACITY page_reporting_capacity
+#define PAGE_REPORTING_CAPACITY get_page_reporting_capacity()
 
 struct page_reporting_dev_info {
 	/* function that alters pages to make them "reported" */

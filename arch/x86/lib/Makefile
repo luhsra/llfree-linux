@@ -72,5 +72,5 @@ endif
         lib-y += memmove_64.o memset_64.o
         lib-y += copy_user_64.o
 	lib-y += cmpxchg16b_emu.o
-        lib-y += memset_nt.o
+        lib-$(CONFIG_LLZERO_NT) += memset_nt.o
 endif

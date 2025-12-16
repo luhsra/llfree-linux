@@ -61,7 +61,9 @@ static inline size_t num_pages_to_zero(struct zone *zone)
 	return pages_to_zero;
 }
 
+#ifdef CONFIG_LLZERO_NT
 extern void memset_nt(void *dst, int value, size_t len);
+#endif
 static int start_zero_tasks(void);
 static int stop_zero_tasks(void);
 

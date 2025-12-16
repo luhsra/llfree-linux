@@ -26,11 +26,17 @@
 # subcomponents.
 
 ifdef CONFIG_X86
-dml_ccflags := -mhard-float -msse
+dml_ccflags :=-msse
+ifdef CONFIG_CC_IS_GCC
+dml_ccflags += -mhard-float
+endif
 endif
 
 ifdef CONFIG_PPC64
-dml_ccflags := -mhard-float -maltivec
+dml_ccflags := -maltivec
+ifdef CONFIG_CC_IS_GCC
+dml_ccflags += -mhard-float
+endif
 endif
 
 ifdef CONFIG_CC_IS_GCC

@@ -27,15 +27,13 @@ void noinline llfree_panic(void)
 llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
-	cores = num_online_cpus();
-
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
 	pr_info("node=%" PRIuS ", offset=%" PRIu64 ", pages=%" PRIuS
-		", trees=%" PRIuS ", children=%" PRIuS "\n",
+		", trees=%" PRIuS ", children=%" PRIuS ", cores=%" PRIuS "\n",
 		node, offset, pages, div_ceil(pages, LLFREE_TREE_SIZE),
-		div_ceil(pages, LLFREE_CHILD_SIZE));
+		div_ceil(pages, LLFREE_CHILD_SIZE), cores);
 
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
@@ -113,9 +111,11 @@ static int llfree_frag_show(struct seq_file *m, void *arg)
 		for (size_t i = 0; i < llfree_frames(zone->llfree);
 		     i += 1 << LLFREE_HUGE_ORDER) {
 			ll_stats_t stats = llfree_stats_at(zone->llfree, i,
-						     LLFREE_HUGE_ORDER);
+							   LLFREE_HUGE_ORDER);
 			// [0, 9], where 0 is entirely allocated and 9 is free
-			size_t level = stats.free_frames == 0 ? 0 : (stats.free_frames / 64 + 1);
+			size_t level = stats.free_frames == 0 ?
+					       0 :
+					       (stats.free_frames / 64 + 1);
 			seq_printf(m, "%zu", level);
 		}
 		seq_printf(m, "\n");

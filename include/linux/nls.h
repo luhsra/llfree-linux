@@ -106,4 +106,3 @@ nls_nullsize(const struct nls_table *codepage)
 #define MODULE_ALIAS_NLS(name)	MODULE_ALIAS("nls_" __stringify(name))
 
 #endif /* _LINUX_NLS_H */
-

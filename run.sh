@@ -1,4 +1,4 @@
-qemu-system-x86_64 -m 32G \
+qemu-system-x86_64 -m 16G \
     -smp 8 -hda /shared/scratch/srastaff/wrenger/hyperalloc-bench/resources/debian.qcow2 \
     -machine pc,accel=kvm \
     -no-reboot -enable-kvm \
@@ -8,4 +8,8 @@ qemu-system-x86_64 -m 32G \
     -nic user,hostfwd=tcp:127.0.0.1:5222-:22 \
     --cpu host,-rdtscp \
     -s \
+    -snapshot \
     $@
+
+    # -drive file=nvm.img,if=none,id=nvm \
+    # -device nvme,serial=deadbeef,drive=nvm \

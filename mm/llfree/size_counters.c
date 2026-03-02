@@ -184,7 +184,7 @@ static struct kobject *size_counters_obj;
 static bool alloc_trace_active = false;
 
 /// Allocation trace
-struct [[gnu::packed]] alloc_entry {
+struct [[gnu::packed]] [[gnu::aligned(16)]] alloc_entry {
 	// microseconds since boot, up to ~4500 hours
 	u64 time_us : 38;
 	// 32 GiB worth of pages + padding
@@ -221,11 +221,20 @@ static inline struct alloc_entry alloc_entry_new(bool alloc, gfp_t flags,
 
 #define ALLOC_ENTRY_PER_PAGE ((PAGE_SIZE - 4) / sizeof(struct alloc_entry))
 
+struct [[gnu::aligned(PAGE_SIZE)]] alloc_entry_header {
+	/// Total number of pages used for the trace
+	u32 total_pages;
+	/// Number of CPU cores of the current system
+	u32 cores;
+	/// Highest possible pfn of the current system
+	u32 max_pfn;
+};
+
 /// Page of allocation entries, reserved per cpu
-struct alloc_entry_page {
+struct [[gnu::aligned(PAGE_SIZE)]] alloc_entry_page {
 	u32 cpuid;
 	struct alloc_entry entries[ALLOC_ENTRY_PER_PAGE];
-} __aligned(PAGE_SIZE);
+};
 
 static_assert(sizeof(struct alloc_entry_page) == PAGE_SIZE,
 	      "alloc_entry_page not PAGE_SIZE");
@@ -257,9 +266,9 @@ void size_counters_trace(bool alloc, gfp_t flags, int order, size_t pfn,
 			alloc_pages_buf =
 				(struct alloc_entry_page *)ivbuf->buffer;
 			BUG_ON(alloc_pages_buf == NULL);
-			BUG_ON(page_idx >= ivbuf->len / PAGE_SIZE);
+			BUG_ON(page_idx + 1 >= ivbuf->len / PAGE_SIZE);
 
-			entry->page = &alloc_pages_buf[page_idx];
+			entry->page = &alloc_pages_buf[page_idx + 1];
 			entry->page->cpuid = smp_processor_id();
 			entry->entry_idx = 0;
 		}
@@ -317,16 +326,23 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 	}
 	if (input[0] == '1') {
 		struct llfree_ivshmem_buf *ivbuf = llfree_ivshmem_get();
+		struct alloc_entry_header *header;
 
 		pr_info("start trace\n");
 		if (alloc_trace_active) {
 			pr_err("Trace already started\n");
 			return -EINVAL;
 		}
-		if (ivbuf == NULL) {
+		if (ivbuf == NULL || ivbuf->buffer == NULL) {
 			pr_err("IVSHMEM buffer not available\n");
 			return -EIO;
 		}
+
+		header = (struct alloc_entry_header *)ivbuf->buffer;
+		header->total_pages = 0;
+		header->cores = num_possible_cpus();
+		header->max_pfn = max_pfn;
+		pr_info("Max pfn =%u\n", header->max_pfn);
 
 		// reset trace state
 		atomic_long_set(&alloc_page_idx, 0);
@@ -343,24 +359,31 @@ static ssize_t sc_trace_write(struct file *file, struct kobject *kobj,
 		return len;
 
 	} else if (input[0] == '0') {
-		size_t pages = atomic_long_read(&alloc_page_idx) + 1;
+		size_t pages = atomic_long_read(&alloc_page_idx);
 		struct llfree_ivshmem_buf *ivbuf = llfree_ivshmem_get();
+		struct alloc_entry_header *header;
 
 		pr_info("stop trace\n");
 		if (!alloc_trace_active) {
 			pr_err("Trace not started\n");
 			return -EINVAL;
 		}
-		if (ivbuf == NULL) {
+		if (ivbuf == NULL || ivbuf->buffer == NULL) {
 			pr_err("IVSHMEM buffer not available\n");
 			return -EIO;
+		}
+		if (pages > ivbuf->len / PAGE_SIZE) {
+			pr_err("Trace overflow: %ld > %llu pages\n", pages,
+			       ivbuf->len / PAGE_SIZE);
+			return -EOVERFLOW;
 		}
 
 		pr_info("Buffer used pages: %ld => %ld\n", pages,
 			pages * PAGE_SIZE);
 
-		// overwrite with zeros to mark the end of the trace
-		memset(ivbuf->buffer + pages * PAGE_SIZE, 0, PAGE_SIZE);
+		// store header
+		header = (struct alloc_entry_header *)ivbuf->buffer;
+		header->total_pages = pages;
 
 		alloc_trace_active = false;
 		bin_attr->size = pages * PAGE_SIZE;

@@ -583,7 +583,8 @@ KBUILD_CFLAGS_MODULE  := -DMODULE
 KBUILD_RUSTFLAGS_MODULE := --cfg MODULE
 KBUILD_LDFLAGS_MODULE :=
 KBUILD_LDFLAGS :=
-CLANG_FLAGS :=
+CLANG_FLAGS := -Wno-default-const-init-var-unsafe \
+	       -Wno-default-const-init-field-unsafe
 
 ifeq ($(KBUILD_CLIPPY),1)
 	RUSTC_OR_CLIPPY_QUIET := CLIPPY
@@ -1064,6 +1065,8 @@ KBUILD_CFLAGS  += -fno-stack-check
 ifdef CONFIG_CC_IS_GCC
 KBUILD_CFLAGS   += -fconserve-stack
 endif
+
+KBUILD_CFLAGS += -fno-builtin-wcslen
 
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS   += -Werror=date-time

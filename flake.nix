@@ -1,34 +1,23 @@
 {
   description = "LLZero Linux Environment";
 
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-  };
+  inputs = { nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11"; };
 
-  outputs =
-    { self, nixpkgs, ... }:
+  outputs = { nixpkgs, ... }:
     let
-      supportedSystems = [
-        "aarch64-linux"
-        "x86_64-linux"
-        "aarch64-darwin"
-        "x86_64-darwin"
-      ];
+      supportedSystems =
+        [ "aarch64-linux" "x86_64-linux" "aarch64-darwin" "x86_64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-    in
-    {
-      devShells = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
-          default = pkgs.mkShellNoCC {
+    in {
+      devShells = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
             buildInputs = with pkgs; [
-              llvmPackages_20.clang
-              llvmPackages_20.lld
-              llvmPackages_20.llvm
-              llvmPackages_20.clang-tools
+              lld
+              lldb
+              llvm
+              gdb
               ncurses
               pkg-config
               qemu
@@ -38,11 +27,8 @@
             ];
             inputsFrom = [ pkgs.linux ];
             hardeningDisable = [ "all" ];
-            env = {
-              LLVM = 1;
-            };
+            env = { LLVM = 1; };
           };
-        }
-      );
+        });
     };
 }

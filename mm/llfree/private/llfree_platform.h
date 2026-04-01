@@ -9,6 +9,7 @@
 #include <asm/pgtable_types.h>
 
 #define ll_align(align) __attribute__((aligned(align)))
+#define unlikely(x) __builtin_expect(!!(x), 0)
 
 #define UINT64_MAX 0xffffffffffffffffllu
 #define PRIu64 "llu"
@@ -16,40 +17,6 @@
 #define PRId64 "lld"
 #define PRIuS "zu"
 #define PRIxS "zx"
-
-/// Number of Bytes in cacheline
-#define LLFREE_CACHE_SIZE 64u
-
-#define LLFREE_FRAME_BITS PAGE_SHIFT
-/// Size of a base frame
-#define LLFREE_FRAME_SIZE (1u << LLFREE_FRAME_BITS)
-
-/// Order of a huge frame
-#define LLFREE_HUGE_ORDER HUGETLB_PAGE_ORDER
-/// Maximum order that can be allocated
-#define LLFREE_MAX_ORDER (LLFREE_HUGE_ORDER + 1u)
-
-/// Num of bits of the larges atomic type of the architecture
-#define LLFREE_ATOMIC_ORDER 6u
-#define LLFREE_ATOMIC_SIZE (1u << LLFREE_ATOMIC_ORDER)
-
-/// Number of frames in a child
-#define LLFREE_CHILD_ORDER LLFREE_HUGE_ORDER
-#define LLFREE_CHILD_SIZE (1u << LLFREE_CHILD_ORDER)
-
-/// Number of frames in a tree
-#define LLFREE_TREE_CHILDREN_ORDER 3u
-#define LLFREE_TREE_CHILDREN (1u << LLFREE_TREE_CHILDREN_ORDER)
-#define LLFREE_TREE_ORDER (LLFREE_HUGE_ORDER + LLFREE_TREE_CHILDREN_ORDER)
-#define LLFREE_TREE_SIZE (1u << LLFREE_TREE_ORDER)
-
-/// Enable reserve on free heuristic
-#define LLFREE_ENABLE_FREE_RESERVE false
-/// Allocate first from already install huge frames, before falling back to evicted ones
-#define LLFREE_PREFER_INSTALLED false
-
-/// Minimal alignment the llc requires for its memory range
-#define LLFREE_ALIGN (1u << LLFREE_MAX_ORDER << LLFREE_FRAME_BITS)
 
 #define llfree_warn(str, ...) pr_warn(str, ##__VA_ARGS__)
 
@@ -141,19 +108,6 @@ static const int ATOM_STORE_ORDER = __ATOMIC_RELEASE;
 	}
 
 #endif
-
-/// Iterates over a Range between multiples of len starting at idx.
-///
-/// Starting at idx up to the next Multiple of len (exclusive). Then the next
-/// step will be the highest multiple of len less than idx. (_base_idx)
-/// Loop will end after len iterations.
-/// code will be executed in each loop.
-/// The current loop value can accessed by current_i
-#define for_offsetted(idx, len)                                   \
-	for (size_t _i = 0, _offset = (idx) % (len),              \
-		    _base_idx = (idx)-_offset, current_i = (idx); \
-	     _i < (len);                                          \
-	     _i = _i + 1, current_i = _base_idx + ((_i + _offset) % (len)))
 
 /// Checks if `obj` contains `expected` and writes `disired` to it if so.
 #define atom_cmp_exchange(obj, expected, desired)                       \

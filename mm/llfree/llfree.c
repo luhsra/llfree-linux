@@ -27,8 +27,6 @@ void noinline llfree_panic(void)
 llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 			   size_t pages)
 {
-	cores = 1; // only one core for now
-
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
 
@@ -40,14 +38,16 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
-	llfree_meta_size_t m = llfree_metadata_size(cores, pages);
+	llfree_tiering_t tiering = llfree_tiering_movable(cores);
+
+	llfree_meta_size_t m = llfree_metadata_size(&tiering, pages);
 	llfree_meta_t meta = {
 		.local = memblock_alloc_node(m.local, LLFREE_CACHE_SIZE, node),
 		.trees = memblock_alloc_node(m.trees, LLFREE_CACHE_SIZE, node),
 		.lower = memblock_alloc_node(m.lower, LLFREE_CACHE_SIZE, node),
 	};
 	llfree_result_t res =
-		llfree_init(self, cores, pages, LLFREE_INIT_ALLOC, meta);
+		llfree_init(self, pages, LLFREE_INIT_ALLOC, meta, &tiering);
 
 	BUG_ON(!llfree_is_ok(res));
 
@@ -78,7 +78,7 @@ static void frag_stop(struct seq_file *m, void *arg)
 {
 }
 
-static void writer(void *arg, char *str)
+static void writer(void *arg, const char *str)
 {
 	seq_printf((struct seq_file *)arg, "%s", str);
 }
@@ -112,10 +112,12 @@ static int llfree_frag_show(struct seq_file *m, void *arg)
 
 		for (size_t i = 0; i < llfree_frames(zone->llfree);
 		     i += 1 << LLFREE_HUGE_ORDER) {
-			size_t free = llfree_free_at(zone->llfree, i,
-						     LLFREE_HUGE_ORDER);
+			ll_stats_t stats = llfree_stats_at(
+				zone->llfree, frame_id(i), LLFREE_HUGE_ORDER);
 			// [0, 9], where 0 is entirely allocated and 9 is free
-			size_t level = free == 0 ? 0 : (free / 64 + 1);
+			size_t level = stats.free_frames == 0 ?
+					       0 :
+					       (stats.free_frames / 64 + 1);
 			seq_printf(m, "%zu", level);
 		}
 		seq_printf(m, "\n");
@@ -190,7 +192,8 @@ static void llfree_cleanup_module(void)
 }
 module_exit(llfree_cleanup_module);
 
-EXPORT_SYMBOL(llfree_free_frames);
-EXPORT_SYMBOL(llfree_free_huge);
+EXPORT_SYMBOL(llfree_stats);
+EXPORT_SYMBOL(llfree_stats_at);
+EXPORT_SYMBOL(llfree_tree_stats);
 // EXPORT_SYMBOL(llfree_dump);
 // EXPORT_SYMBOL(llfree_print);

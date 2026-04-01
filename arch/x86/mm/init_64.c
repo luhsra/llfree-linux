@@ -1363,8 +1363,8 @@ void __init mem_init(void)
 		struct zone *zone;
 		int zid = 0;
 		for_each_populated_zone(zone) {
-			u64 num_pages = llfree_free_frames(zone->llfree);
-			pr_info("llfree: zid=%d free=%llu", zid, num_pages);
+			ll_tree_stats_t stats = llfree_tree_stats(zone->llfree);
+			pr_info("llfree: zid=%d free=%zu", zid, stats.free_frames);
 			zid += 1;
 		}
 	};

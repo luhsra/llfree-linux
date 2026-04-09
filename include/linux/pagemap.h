@@ -471,7 +471,7 @@ struct folio *filemap_alloc_folio(gfp_t gfp, unsigned int order);
 #else
 static inline struct folio *filemap_alloc_folio(gfp_t gfp, unsigned int order)
 {
-	return folio_alloc(gfp, order);
+	return folio_alloc(gfp | ___GFP_PAGE_CACHE, order);
 }
 #endif
 
@@ -1009,7 +1009,7 @@ static inline bool folio_lock_or_retry(struct folio *folio,
 void folio_wait_bit(struct folio *folio, int bit_nr);
 int folio_wait_bit_killable(struct folio *folio, int bit_nr);
 
-/* 
+/*
  * Wait for a folio to be unlocked.
  *
  * This must be called with the caller "holding" the folio,

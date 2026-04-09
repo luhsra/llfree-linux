@@ -1337,9 +1337,8 @@ void __init mem_init_llfree(void)
 	struct zone *zone;
 
 	for_each_populated_zone(zone) {
-		zone->llfree = llfree_node_init(zone->node, num_possible_cpus(),
-						zone->zone_start_pfn,
-						zone->spanned_pages);
+		zone->llfree = llfree_node_init(
+			zone->node, zone->zone_start_pfn, zone->spanned_pages);
 		BUG_ON(zone->llfree == NULL);
 	}
 }

@@ -1107,9 +1107,10 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, frame_id(frame),
-			 llfree_movable_request(num_possible_cpus(), order, cpu,
-						migratetype ==
-							MIGRATE_MOVABLE));
+			 llfree_linux_request(order,
+					      migratetype == MIGRATE_MOVABLE ?
+						      __GFP_MOVABLE :
+						      0));
 	size_counters_trace(false,
 			    migratetype == MIGRATE_MOVABLE ? __GFP_MOVABLE : 0,
 			    order, page_to_pfn(page), current->pid);
@@ -1138,8 +1139,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 
 	cpu = get_cpu();
 	ret = llfree_put(zone->llfree, frame_id(frame),
-			 llfree_movable_request(num_possible_cpus(), order, cpu,
-						false));
+			 llfree_linux_request(order, 0));
 	size_counters_trace(true, 0, order, page_to_pfn(page), current->pid);
 	put_cpu();
 
@@ -1205,9 +1205,10 @@ static inline void __free_one_page(struct page *page, unsigned long pfn,
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
 
 	ret = llfree_put(zone->llfree, frame_id(frame),
-			 llfree_movable_request(num_possible_cpus(), order, cpu,
-						migratetype ==
-							MIGRATE_MOVABLE));
+			 llfree_linux_request(order,
+					      migratetype == MIGRATE_MOVABLE ?
+						      __GFP_MOVABLE :
+						      0));
 	size_counters_trace(false,
 			    migratetype == MIGRATE_MOVABLE ? __GFP_MOVABLE : 0,
 			    order, pfn, current->pid);
@@ -4119,9 +4120,7 @@ static inline struct page *rmqueue(struct zone *preferred_zone,
 
 	cpu = get_cpu();
 	res = llfree_get(zone->llfree, frame_id_none(),
-			 llfree_movable_request(num_possible_cpus(), order, cpu,
-						migratetype ==
-							MIGRATE_MOVABLE));
+			 llfree_linux_request(order, gfp_flags));
 	if (!llfree_is_ok(res)) {
 		put_cpu();
 		// pr_err("llfree thread %u: error %lld", current->pid, res.val);

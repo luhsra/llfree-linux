@@ -24,8 +24,70 @@ void noinline llfree_panic(void)
 	llfree_warn("panic");
 }
 
-llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
-			   size_t pages)
+/// Simple movable policy (3 tiers: immovable=0, movable=1, huge=2)
+static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
+							    uint8_t target,
+							    size_t free)
+{
+	if (requested > target)
+		return (llfree_policy_t){ LLFREE_POLICY_STEAL, 0 };
+	if (requested < target)
+		return (llfree_policy_t){ LLFREE_POLICY_DEMOTE, 0 };
+	/* same tier */
+	if (free >= LLFREE_TREE_SIZE / 2)
+		return (llfree_policy_t){ LLFREE_POLICY_MATCH, 1 };
+	if (free >= LLFREE_TREE_SIZE / 64)
+		return (llfree_policy_t){ LLFREE_POLICY_MATCH, UINT8_MAX };
+	return (llfree_policy_t){ LLFREE_POLICY_MATCH, 2 };
+}
+
+enum : uint8_t {
+	LLTIER_IMMOVABLE = 0,
+	LLTIER_MOVABLE = 1,
+	LLTIER_CACHE = 2,
+	LLTIER_LONG = 3,
+	LLTIER_HUGE = 4,
+};
+#define LL_PIDS 8
+
+/// Create linux specific tiering.
+/// Each tier gets `cores` local slots.
+static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
+{
+	return (llfree_tiering_t){
+		.num_tiers = 5,
+		.default_tier = 4,
+		.policy = llfree_linux_policy,
+		.tiers = { { .tier = LLTIER_IMMOVABLE, .count = LL_PIDS },
+			   { .tier = LLTIER_MOVABLE, .count = LL_PIDS },
+			   { .tier = LLTIER_CACHE, .count = LL_PIDS },
+			   { .tier = LLTIER_LONG, .count = LL_PIDS },
+			   { .tier = LLTIER_HUGE, .count = cores } }
+	};
+}
+
+llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
+{
+	if (order >= LLFREE_HUGE_ORDER)
+		return llreq(order, LLTIER_HUGE,
+			     ll_some(raw_smp_processor_id()));
+	if (flags & __GFP_MOVABLE &&
+	    (!(flags & __GFP_HIGHMEM) || flags & __GFP_NOFAIL ||
+	     !(flags & __GFP_FS) || flags & __GFP_NORETRY)) {
+		return llreq(order, LLTIER_LONG,
+			     ll_some(current->pid % LL_PIDS));
+	}
+	if (flags & __GFP_MOVABLE && flags & ___GFP_PAGE_CACHE) {
+		return llreq(order, LLTIER_CACHE,
+			     ll_some(current->pid % LL_PIDS));
+	}
+	if (flags & __GFP_MOVABLE)
+		return llreq(order, LLTIER_MOVABLE,
+			     ll_some(current->pid % LL_PIDS));
+	return llreq(order, LLTIER_IMMOVABLE, ll_some(current->pid % LL_PIDS));
+}
+
+llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)
 {
 	u64 offset = align_down(start_pfn, 1 << LLFREE_MAX_ORDER);
 	pages += start_pfn - offset; // correct length
@@ -38,7 +100,7 @@ llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
-	llfree_tiering_t tiering = llfree_tiering_movable(cores);
+	llfree_tiering_t tiering = llfree_tiering_linux(num_possible_cpus());
 
 	llfree_meta_size_t m = llfree_metadata_size(&tiering, pages);
 	llfree_meta_t meta = {

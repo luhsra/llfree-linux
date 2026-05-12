@@ -48,7 +48,6 @@ enum : uint8_t {
 	LLTIER_LONG = 3,
 	LLTIER_HUGE = 4,
 };
-#define LL_PIDS 8
 
 /// Create linux specific tiering.
 /// Each tier gets `cores` local slots.
@@ -58,10 +57,10 @@ static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
 		.num_tiers = 5,
 		.default_tier = 4,
 		.policy = llfree_linux_policy,
-		.tiers = { { .tier = LLTIER_IMMOVABLE, .count = LL_PIDS },
-			   { .tier = LLTIER_MOVABLE, .count = LL_PIDS },
-			   { .tier = LLTIER_CACHE, .count = LL_PIDS },
-			   { .tier = LLTIER_LONG, .count = LL_PIDS },
+		.tiers = { { .tier = LLTIER_IMMOVABLE, .count = cores },
+			   { .tier = LLTIER_MOVABLE, .count = cores },
+			   { .tier = LLTIER_CACHE, .count = cores },
+			   { .tier = LLTIER_LONG, .count = cores },
 			   { .tier = LLTIER_HUGE, .count = cores } }
 	};
 }
@@ -71,20 +70,21 @@ llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
 	if (order >= LLFREE_HUGE_ORDER)
 		return llreq(order, LLTIER_HUGE,
 			     ll_some(raw_smp_processor_id()));
+
+	size_t cores = num_online_cpus();
 	if (flags & __GFP_MOVABLE &&
 	    (!(flags & __GFP_HIGHMEM) || flags & __GFP_NOFAIL ||
 	     !(flags & __GFP_FS) || flags & __GFP_NORETRY)) {
-		return llreq(order, LLTIER_LONG,
-			     ll_some(current->pid % LL_PIDS));
+		return llreq(order, LLTIER_LONG, ll_some(current->pid % cores));
 	}
 	if (flags & __GFP_MOVABLE && flags & ___GFP_PAGE_CACHE) {
 		return llreq(order, LLTIER_CACHE,
-			     ll_some(current->pid % LL_PIDS));
+			     ll_some(current->pid % cores));
 	}
 	if (flags & __GFP_MOVABLE)
 		return llreq(order, LLTIER_MOVABLE,
-			     ll_some(current->pid % LL_PIDS));
-	return llreq(order, LLTIER_IMMOVABLE, ll_some(current->pid % LL_PIDS));
+			     ll_some(current->pid % cores));
+	return llreq(order, LLTIER_IMMOVABLE, ll_some(current->pid % cores));
 }
 
 llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)

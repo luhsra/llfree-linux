@@ -20,4 +20,9 @@ config LLFREE_FAST_FREE
 	help
 	  Skip struct page checks for higher order frees. This might break memory hotplugging.
 
+config LLFREE_PAGE_CACHE
+	bool "Page cache gfp flag"
+	help
+	  Encode PAGE_CACHE in GFP for improved fragmentation avoidance.
+
 endmenu

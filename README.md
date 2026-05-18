@@ -3,10 +3,20 @@
 First enable the `CONFIG_LLFREE` option (`make O=build-llfree-vm LLVM=1 menuconfig`).
 Currently only x86_64 has been tested.
 
-Then the Kernel can be build as usual (with llvm):
+First, load git submodules:
 ```sh
-make O=build-llfree-vm LLVM=1
+git submodule update --init
 ```
+
+Then the Kernel can be build as usual:
+```sh
+make O=build-llfree-vm
+```
+
+> For baseline Linux with the buddy allocator:
+> ```sh
+> make O=build-buddy-vm
+> ```
 
 ## Structure
 

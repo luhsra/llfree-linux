@@ -24,6 +24,7 @@
               qemu_kvm
               qemu-utils
               guestfs-tools
+              just
             ];
             inputsFrom = [ pkgs.linux ];
             hardeningDisable = [ "all" ];

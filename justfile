@@ -11,6 +11,7 @@ docker_cfg := """
     PID_NS
     IPC_NS
     UTS_NS
+    USER_NS
     CGROUPS
     CGROUP_CPUACCT
     CGROUP_DEVICE

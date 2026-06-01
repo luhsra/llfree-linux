@@ -19,6 +19,19 @@ MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
+static unsigned int llfree_tiering_level = 0;
+static int __init set_early_tiering_level(char *str)
+{
+	if (kstrtouint(str, 0, &llfree_tiering_level))
+		return -EINVAL;
+	if (llfree_tiering_level > 2) {
+	        pr_err("llfree_tiering_level must be 0, 1 or 2\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+early_param("llfree_tiering_level", set_early_tiering_level);
+
 void noinline llfree_panic(void)
 {
 	llfree_warn("panic");
@@ -41,50 +54,70 @@ static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 	return (llfree_policy_t){ LLFREE_POLICY_MATCH, 2 };
 }
 
-enum : uint8_t {
-	LLTIER_IMMOVABLE = 0,
-	LLTIER_MOVABLE = 1,
-	LLTIER_CACHE = 2,
-	LLTIER_LONG = 3,
-	LLTIER_HUGE = 4,
-};
-
 /// Create linux specific tiering.
 /// Each tier gets `cores` local slots.
 static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
 {
-	return (llfree_tiering_t){
-		.num_tiers = 5,
-		.default_tier = 4,
-		.policy = llfree_linux_policy,
-		.tiers = { { .tier = LLTIER_IMMOVABLE, .count = cores },
-			   { .tier = LLTIER_MOVABLE, .count = cores },
-			   { .tier = LLTIER_CACHE, .count = cores },
-			   { .tier = LLTIER_LONG, .count = cores },
-			   { .tier = LLTIER_HUGE, .count = cores } }
-	};
+	pr_info("init tiering level %u\n", llfree_tiering_level);
+
+	llfree_tiering_t tiering = { .num_tiers = 0,
+				     .default_tier = 0,
+				     .policy = llfree_linux_policy,
+				     .tiers = { 0 } };
+
+	size_t tiers = 0;
+	// Immovable
+	tiering.tiers[tiers] =
+		(llfree_tier_conf_t){ .tier = tiers, .count = cores };
+	tiers++;
+	// Movable
+	tiering.tiers[tiers] =
+		(llfree_tier_conf_t){ .tier = tiers, .count = cores };
+	tiers++;
+	// Cache
+	if (llfree_tiering_level >= 1) {
+		tiering.tiers[tiers] =
+			(llfree_tier_conf_t){ .tier = tiers, .count = cores };
+		tiers++;
+	}
+	// Long-living
+	if (llfree_tiering_level >= 2) {
+		tiering.tiers[tiers] =
+			(llfree_tier_conf_t){ .tier = tiers, .count = cores };
+		tiers++;
+	}
+	// Huge
+	tiering.tiers[tiers] =
+		(llfree_tier_conf_t){ .tier = tiers, .count = cores };
+	tiers++;
+
+	tiering.num_tiers = tiers;
+	tiering.default_tier = tiers - 1;
+
+	return tiering;
 }
 
 llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
 {
 	if (order >= LLFREE_HUGE_ORDER)
-		return llreq(order, LLTIER_HUGE,
+		return llreq(order, 2 + llfree_tiering_level,
 			     ll_some(raw_smp_processor_id()));
 
 	size_t cores = num_online_cpus();
-	if (flags & __GFP_MOVABLE &&
-	    (!(flags & __GFP_HIGHMEM) || flags & __GFP_NOFAIL ||
-	     !(flags & __GFP_FS) || flags & __GFP_NORETRY)) {
-		return llreq(order, LLTIER_LONG, ll_some(current->pid % cores));
+	if (flags & __GFP_MOVABLE) {
+		if (llfree_tiering_level >= 2 && !(flags & ___GFP_PAGE_CACHE) &&
+		    (flags &
+		     (__GFP_RECLAIMABLE | __GFP_NORETRY | __GFP_NOFAIL))) {
+			return llreq(order, 3, ll_some(current->pid % cores));
+		}
+
+		if (llfree_tiering_level >= 1 && flags & ___GFP_PAGE_CACHE) {
+			return llreq(order, 2, ll_some(current->pid % cores));
+		}
+
+		return llreq(order, 1, ll_some(current->pid % cores));
 	}
-	if (flags & __GFP_MOVABLE && flags & ___GFP_PAGE_CACHE) {
-		return llreq(order, LLTIER_CACHE,
-			     ll_some(current->pid % cores));
-	}
-	if (flags & __GFP_MOVABLE)
-		return llreq(order, LLTIER_MOVABLE,
-			     ll_some(current->pid % cores));
-	return llreq(order, LLTIER_IMMOVABLE, ll_some(current->pid % cores));
+	return llreq(order, 0, ll_some(current->pid % cores));
 }
 
 llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)

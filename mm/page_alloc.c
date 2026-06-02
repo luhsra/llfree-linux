@@ -4298,6 +4298,8 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		return true;
 
 #ifdef CONFIG_LLFREE
+        // Counting the number of free frames in llfree takes as long as an allocation
+        // -> So just try allocating instead
 	return true;
 #endif
 
@@ -5229,12 +5231,15 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 * Make sure we converge to OOM if we cannot make any progress
 	 * several times in the row.
 	 */
-#ifndef CONFIG_LLFREE
 	if (*no_progress_loops > MAX_RECLAIM_RETRIES) {
+#ifdef CONFIG_LLFREE
+                // LLFree handles fragmentation, no extra pageblock reservation
+                return false;
+#else
 		/* Before OOM, exhaust highatomic_reserve */
 		return unreserve_highatomic_pageblock(ac, true);
-	}
 #endif
+	}
 
 	/*
 	 * Keep reclaiming pages while there is a chance this will lead

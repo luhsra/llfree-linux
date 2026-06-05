@@ -36,10 +36,10 @@
 /// Minimal alignment the llfree requires for its memory range
 #define LLFREE_ALIGN (1u << LLFREE_MAX_ORDER << LLFREE_FRAME_BITS)
 
-/// Number of bits for the tier field in tree_t
-#define LLFREE_TIER_BITS 3u
-#define LLFREE_TIER_NONE UINT8_MAX
-/// Maximum number of tiers (limited by tree tier field width)
-#define LLFREE_MAX_TIERS (1u << LLFREE_TIER_BITS)
+/// Number of bits for the cluster field in tree_t
+#define LLFREE_CLUSTER_BITS 3u
+#define LLFREE_CLUSTER_NONE UINT8_MAX
+/// Maximum number of clusters (limited by tree cluster field width)
+#define LLFREE_MAX_CLUSTERS (1u << LLFREE_CLUSTER_BITS)
 
 #define UINT8_MAX (uint8_t)(0xffu)

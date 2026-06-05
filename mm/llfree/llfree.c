@@ -20,25 +20,25 @@ MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
-static unsigned int llfree_tiering_level = 0;
-static int __init set_early_tiering_level(char *str)
+static unsigned int llfree_clustering_level = 0;
+static int __init set_early_clustering_level(char *str)
 {
-	if (kstrtouint(str, 0, &llfree_tiering_level))
+	if (kstrtouint(str, 0, &llfree_clustering_level))
 		return -EINVAL;
-	if (llfree_tiering_level > 3) {
-		pr_err("llfree_tiering_level must be 0, 1, 2 or 3\n");
+	if (llfree_clustering_level > 3) {
+		pr_err("llfree_clustering_level must be 0, 1, 2 or 3\n");
 		return -EINVAL;
 	}
 	return 0;
 }
-early_param("llfree_tiering_level", set_early_tiering_level);
+early_param("llfree_clustering_level", set_early_clustering_level);
 
 void noinline llfree_panic(void)
 {
 	llfree_warn("panic");
 }
 
-/// Simple movable policy (3 tiers: immovable=0, movable=1, huge=2)
+/// Simple movable policy (3 clusters: immovable=0, movable=1, huge=2)
 static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 							    uint8_t target,
 							    size_t free)
@@ -47,7 +47,7 @@ static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 		return (llfree_policy_t){ LLFREE_POLICY_STEAL, 0 };
 	if (requested < target)
 		return (llfree_policy_t){ LLFREE_POLICY_DEMOTE, 0 };
-	/* same tier */
+	/* matching cluster */
 	if (free >= LLFREE_TREE_SIZE / 2)
 		return (llfree_policy_t){ LLFREE_POLICY_MATCH, 1 };
 	if (free >= LLFREE_TREE_SIZE / 64)
@@ -57,19 +57,20 @@ static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_tiering_t ll_unused llfree_tiering_level_0(size_t cores)
+static inline llfree_clustering_t ll_unused
+llfree_clustering_level_0(size_t cores)
 {
-	return (llfree_tiering_t){ .num_tiers = 3,
-				   .default_tier = 2,
-				   .policy = llfree_linux_policy,
-				   .tiers = {
-					   // Immovable
-					   { .tier = 0, .count = cores },
-					   // Movable
-					   { .tier = 1, .count = cores },
-					   // Huge
-					   { .tier = 2, .count = cores },
-				   } };
+	return (llfree_clustering_t){ .num_clusters = 3,
+				      .default_cluster = 2,
+				      .policy = llfree_linux_policy,
+				      .clusters = {
+					      // Immovable
+					      { .cluster = 0, .count = cores },
+					      // Movable
+					      { .cluster = 1, .count = cores },
+					      // Huge
+					      { .cluster = 2, .count = cores },
+				      } };
 }
 static inline llfree_request_t ll_unused llfree_request_0(uint8_t order,
 							  gfp_t flags)
@@ -84,21 +85,22 @@ static inline llfree_request_t ll_unused llfree_request_0(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_tiering_t ll_unused llfree_tiering_level_1(size_t cores)
+static inline llfree_clustering_t ll_unused
+llfree_clustering_level_1(size_t cores)
 {
-	return (llfree_tiering_t){ .num_tiers = 4,
-				   .default_tier = 3,
-				   .policy = llfree_linux_policy,
-				   .tiers = {
-					   // Immovable
-					   { .tier = 0, .count = cores },
-					   // Movable
-					   { .tier = 1, .count = cores },
-					   // Page Cache
-					   { .tier = 2, .count = cores },
-					   // Huge
-					   { .tier = 3, .count = cores },
-				   } };
+	return (llfree_clustering_t){ .num_clusters = 4,
+				      .default_cluster = 3,
+				      .policy = llfree_linux_policy,
+				      .clusters = {
+					      // Immovable
+					      { .cluster = 0, .count = cores },
+					      // Movable
+					      { .cluster = 1, .count = cores },
+					      // Page Cache
+					      { .cluster = 2, .count = cores },
+					      // Huge
+					      { .cluster = 3, .count = cores },
+				      } };
 }
 static inline llfree_request_t ll_unused llfree_request_1(uint8_t order,
 							  gfp_t flags)
@@ -116,23 +118,24 @@ static inline llfree_request_t ll_unused llfree_request_1(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_tiering_t ll_unused llfree_tiering_level_2(size_t cores)
+static inline llfree_clustering_t ll_unused
+llfree_clustering_level_2(size_t cores)
 {
-	return (llfree_tiering_t){ .num_tiers = 5,
-				   .default_tier = 4,
-				   .policy = llfree_linux_policy,
-				   .tiers = {
-					   // Immovable
-					   { .tier = 0, .count = cores },
-					   // Movable
-					   { .tier = 1, .count = cores },
-					   // Page Cache
-					   { .tier = 2, .count = cores },
-					   // Long
-					   { .tier = 3, .count = cores },
-					   // Huge
-					   { .tier = 4, .count = cores },
-				   } };
+	return (llfree_clustering_t){ .num_clusters = 5,
+				      .default_cluster = 4,
+				      .policy = llfree_linux_policy,
+				      .clusters = {
+					      // Immovable
+					      { .cluster = 0, .count = cores },
+					      // Movable
+					      { .cluster = 1, .count = cores },
+					      // Page Cache
+					      { .cluster = 2, .count = cores },
+					      // Long
+					      { .cluster = 3, .count = cores },
+					      // Huge
+					      { .cluster = 4, .count = cores },
+				      } };
 }
 static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 							  gfp_t flags)
@@ -150,23 +153,23 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 	return llreq(order, 0, core);
 }
 
-
 // -----------------------------------------------------------------------------
-static inline llfree_tiering_t ll_unused llfree_tiering_level_3(size_t cores)
+static inline llfree_clustering_t ll_unused
+llfree_clustering_level_3(size_t cores)
 {
-	return (llfree_tiering_t){ .num_tiers = 4,
-				   .default_tier = 3,
-				   .policy = llfree_linux_policy,
-				   .tiers = {
-					   // Immovable
-					   { .tier = 0, .count = cores },
-					   // Movable
-					   { .tier = 1, .count = cores },
-					   // Page Cache
-					   { .tier = 2, .count = cores },
-					   // Huge
-					   { .tier = 3, .count = cores },
-				   } };
+	return (llfree_clustering_t){ .num_clusters = 4,
+				      .default_cluster = 3,
+				      .policy = llfree_linux_policy,
+				      .clusters = {
+					      // Immovable
+					      { .cluster = 0, .count = cores },
+					      // Movable
+					      { .cluster = 1, .count = cores },
+					      // Page Cache
+					      { .cluster = 2, .count = cores },
+					      // Huge
+					      { .cluster = 3, .count = cores },
+				      } };
 }
 static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
 							  gfp_t flags)
@@ -186,27 +189,27 @@ static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-/// Create linux specific tiering.
-static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
+/// Create linux specific clustering.
+static inline llfree_clustering_t ll_unused llfree_clustering_linux(size_t cores)
 {
-	pr_info("init tiering level %u\n", llfree_tiering_level);
+	pr_info("init clustering level %u\n", llfree_clustering_level);
 
-	if (llfree_tiering_level == 3)
-		return llfree_tiering_level_3(cores);
-	if (llfree_tiering_level == 2)
-		return llfree_tiering_level_2(cores);
-	if (llfree_tiering_level == 1)
-		return llfree_tiering_level_1(cores);
-	return llfree_tiering_level_0(cores);
+	if (llfree_clustering_level == 3)
+		return llfree_clustering_level_3(cores);
+	if (llfree_clustering_level == 2)
+		return llfree_clustering_level_2(cores);
+	if (llfree_clustering_level == 1)
+		return llfree_clustering_level_1(cores);
+	return llfree_clustering_level_0(cores);
 }
 
 llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
 {
-	if (llfree_tiering_level == 3)
+	if (llfree_clustering_level == 3)
 		return llfree_request_3(order, flags);
-	if (llfree_tiering_level == 2)
+	if (llfree_clustering_level == 2)
 		return llfree_request_2(order, flags);
-	if (llfree_tiering_level == 1)
+	if (llfree_clustering_level == 1)
 		return llfree_request_1(order, flags);
 	return llfree_request_0(order, flags);
 }
@@ -224,16 +227,17 @@ llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
-	llfree_tiering_t tiering = llfree_tiering_linux(num_possible_cpus());
+	llfree_clustering_t clustering =
+		llfree_clustering_linux(num_possible_cpus());
 
-	llfree_meta_size_t m = llfree_metadata_size(&tiering, pages);
+	llfree_meta_size_t m = llfree_metadata_size(&clustering, pages);
 	llfree_meta_t meta = {
 		.local = memblock_alloc_node(m.local, LLFREE_CACHE_SIZE, node),
 		.trees = memblock_alloc_node(m.trees, LLFREE_CACHE_SIZE, node),
 		.lower = memblock_alloc_node(m.lower, LLFREE_CACHE_SIZE, node),
 	};
 	llfree_result_t res =
-		llfree_init(self, pages, LLFREE_INIT_ALLOC, meta, &tiering);
+		llfree_init(self, pages, LLFREE_INIT_ALLOC, meta, &clustering);
 
 	BUG_ON(!llfree_is_ok(res));
 

@@ -1,3 +1,4 @@
+#include "linux/gfp_types.h"
 #include "llfree_platform.h"
 
 #include <linux/align.h>
@@ -24,8 +25,8 @@ static int __init set_early_tiering_level(char *str)
 {
 	if (kstrtouint(str, 0, &llfree_tiering_level))
 		return -EINVAL;
-	if (llfree_tiering_level > 2) {
-		pr_err("llfree_tiering_level must be 0, 1 or 2\n");
+	if (llfree_tiering_level > 3) {
+		pr_err("llfree_tiering_level must be 0, 1, 2 or 3\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -149,6 +150,40 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 	return llreq(order, 0, core);
 }
 
+
+// -----------------------------------------------------------------------------
+static inline llfree_tiering_t ll_unused llfree_tiering_level_3(size_t cores)
+{
+	return (llfree_tiering_t){ .num_tiers = 4,
+				   .default_tier = 3,
+				   .policy = llfree_linux_policy,
+				   .tiers = {
+					   // Immovable
+					   { .tier = 0, .count = cores },
+					   // Movable
+					   { .tier = 1, .count = cores },
+					   // Page Cache
+					   { .tier = 2, .count = cores },
+					   // Huge
+					   { .tier = 3, .count = cores },
+				   } };
+}
+static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
+							  gfp_t flags)
+{
+	if (order >= LLFREE_HUGE_ORDER) {
+		ll_optional_t core = ll_some(raw_smp_processor_id());
+		return llreq(order, 3, core);
+	}
+	ll_optional_t pid = ll_some(current->pid % num_possible_cpus());
+	if (flags & __GFP_MOVABLE) {
+		if (flags & ___GFP_PAGE_CACHE)
+			return llreq(order, 2, pid);
+		return llreq(order, 1, pid);
+	}
+	return llreq(order, 0, pid);
+}
+
 // -----------------------------------------------------------------------------
 
 /// Create linux specific tiering.
@@ -156,6 +191,8 @@ static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
 {
 	pr_info("init tiering level %u\n", llfree_tiering_level);
 
+	if (llfree_tiering_level == 3)
+		return llfree_tiering_level_3(cores);
 	if (llfree_tiering_level == 2)
 		return llfree_tiering_level_2(cores);
 	if (llfree_tiering_level == 1)
@@ -165,6 +202,8 @@ static inline llfree_tiering_t ll_unused llfree_tiering_linux(size_t cores)
 
 llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
 {
+	if (llfree_tiering_level == 3)
+		return llfree_request_3(order, flags);
 	if (llfree_tiering_level == 2)
 		return llfree_request_2(order, flags);
 	if (llfree_tiering_level == 1)

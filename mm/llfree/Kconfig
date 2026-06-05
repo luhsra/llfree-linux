@@ -25,4 +25,12 @@ config LLFREE_PAGE_CACHE
 	help
 	  Encode PAGE_CACHE in GFP for improved fragmentation avoidance.
 
+config LLFREE_TREE_HUGE_ORDER
+	int "Number of huge pages per tree"
+	depends on LLFREE
+	default 3
+	help
+      This defines the order of the huge pages in a tree.
+      It is expected to be between 0 and 9 (inclusive).
+
 endmenu

@@ -144,10 +144,11 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 	if (order >= LLFREE_HUGE_ORDER)
 		return llreq(order, 4, core);
 	if (flags & __GFP_MOVABLE) {
-		if (flags & (__GFP_RECLAIMABLE | __GFP_NORETRY | __GFP_NOFAIL))
-			return llreq(order, 3, core);
-		if (flags & ___GFP_PAGE_CACHE)
+		if (flags & ___GFP_PAGE_CACHE) {
+			if (flags & (__GFP_NORETRY | __GFP_NOFAIL))
+				return llreq(order, 3, core);
 			return llreq(order, 2, core);
+		}
 		return llreq(order, 1, core);
 	}
 	return llreq(order, 0, core);

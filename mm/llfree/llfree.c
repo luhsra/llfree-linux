@@ -20,25 +20,25 @@ MODULE_LICENSE("MIT");
 MODULE_DESCRIPTION("LLFree Allocator");
 MODULE_AUTHOR("Lars Wrenger");
 
-static unsigned int llfree_clustering_level = 0;
-static int __init set_early_clustering_level(char *str)
+static unsigned int llfree_class_config = 0;
+static int __init set_llfree_class_config(char *str)
 {
-	if (kstrtouint(str, 0, &llfree_clustering_level))
+	if (kstrtouint(str, 0, &llfree_class_config))
 		return -EINVAL;
-	if (llfree_clustering_level > 3) {
-		pr_err("llfree_clustering_level must be 0, 1, 2 or 3\n");
+	if (llfree_class_config > 3) {
+		pr_err("llfree_class_config must be 0, 1, 2 or 3\n");
 		return -EINVAL;
 	}
 	return 0;
 }
-early_param("llfree_clustering_level", set_early_clustering_level);
+early_param("llfree_class_config", set_llfree_class_config);
 
 void noinline llfree_panic(void)
 {
 	llfree_warn("panic");
 }
 
-/// Simple movable policy (3 clusters: immovable=0, movable=1, huge=2)
+/// Simple movable policy (3 classes: immovable=0, movable=1, huge=2)
 static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 							    uint8_t target,
 							    size_t free)
@@ -47,7 +47,7 @@ static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 		return (llfree_policy_t){ LLFREE_POLICY_STEAL, 0 };
 	if (requested < target)
 		return (llfree_policy_t){ LLFREE_POLICY_DEMOTE, 0 };
-	/* matching cluster */
+	/* matching class */
 	if (free >= LLFREE_TREE_SIZE / 2)
 		return (llfree_policy_t){ LLFREE_POLICY_MATCH, 1 };
 	if (free >= LLFREE_TREE_SIZE / 64)
@@ -57,20 +57,19 @@ static inline llfree_policy_t ll_unused llfree_linux_policy(uint8_t requested,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_clustering_t ll_unused
-llfree_clustering_level_0(size_t cores)
+static inline llfree_classing_t ll_unused llfree_class_config_0(size_t cores)
 {
-	return (llfree_clustering_t){ .num_clusters = 3,
-				      .default_cluster = 2,
-				      .policy = llfree_linux_policy,
-				      .clusters = {
-					      // Immovable
-					      { .cluster = 0, .count = cores },
-					      // Movable
-					      { .cluster = 1, .count = cores },
-					      // Huge
-					      { .cluster = 2, .count = cores },
-				      } };
+	return (llfree_classing_t){ .num_classes = 3,
+				    .default_class = 2,
+				    .policy = llfree_linux_policy,
+				    .classes = {
+					    // Immovable
+					    { .class = 0, .count = cores },
+					    // Movable
+					    { .class = 1, .count = cores },
+					    // Huge
+					    { .class = 2, .count = cores },
+				    } };
 }
 static inline llfree_request_t ll_unused llfree_request_0(uint8_t order,
 							  gfp_t flags)
@@ -85,22 +84,21 @@ static inline llfree_request_t ll_unused llfree_request_0(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_clustering_t ll_unused
-llfree_clustering_level_1(size_t cores)
+static inline llfree_classing_t ll_unused llfree_class_config_1(size_t cores)
 {
-	return (llfree_clustering_t){ .num_clusters = 4,
-				      .default_cluster = 3,
-				      .policy = llfree_linux_policy,
-				      .clusters = {
-					      // Immovable
-					      { .cluster = 0, .count = cores },
-					      // Movable
-					      { .cluster = 1, .count = cores },
-					      // Page Cache
-					      { .cluster = 2, .count = cores },
-					      // Huge
-					      { .cluster = 3, .count = cores },
-				      } };
+	return (llfree_classing_t){ .num_classes = 4,
+				    .default_class = 3,
+				    .policy = llfree_linux_policy,
+				    .classes = {
+					    // Immovable
+					    { .class = 0, .count = cores },
+					    // Movable
+					    { .class = 1, .count = cores },
+					    // Page Cache
+					    { .class = 2, .count = cores },
+					    // Huge
+					    { .class = 3, .count = cores },
+				    } };
 }
 static inline llfree_request_t ll_unused llfree_request_1(uint8_t order,
 							  gfp_t flags)
@@ -118,24 +116,23 @@ static inline llfree_request_t ll_unused llfree_request_1(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-static inline llfree_clustering_t ll_unused
-llfree_clustering_level_2(size_t cores)
+static inline llfree_classing_t ll_unused llfree_class_config_2(size_t cores)
 {
-	return (llfree_clustering_t){ .num_clusters = 5,
-				      .default_cluster = 4,
-				      .policy = llfree_linux_policy,
-				      .clusters = {
-					      // Immovable
-					      { .cluster = 0, .count = cores },
-					      // Movable
-					      { .cluster = 1, .count = cores },
-					      // Page Cache
-					      { .cluster = 2, .count = cores },
-					      // Long
-					      { .cluster = 3, .count = cores },
-					      // Huge
-					      { .cluster = 4, .count = cores },
-				      } };
+	return (llfree_classing_t){ .num_classes = 5,
+				    .default_class = 4,
+				    .policy = llfree_linux_policy,
+				    .classes = {
+					    // Immovable
+					    { .class = 0, .count = cores },
+					    // Movable
+					    { .class = 1, .count = cores },
+					    // Page Cache
+					    { .class = 2, .count = cores },
+					    // Long
+					    { .class = 3, .count = cores },
+					    // Huge
+					    { .class = 4, .count = cores },
+				    } };
 }
 static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 							  gfp_t flags)
@@ -155,22 +152,21 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 }
 
 // -----------------------------------------------------------------------------
-static inline llfree_clustering_t ll_unused
-llfree_clustering_level_3(size_t cores)
+static inline llfree_classing_t ll_unused llfree_class_config_3(size_t cores)
 {
-	return (llfree_clustering_t){ .num_clusters = 4,
-				      .default_cluster = 3,
-				      .policy = llfree_linux_policy,
-				      .clusters = {
-					      // Immovable
-					      { .cluster = 0, .count = cores },
-					      // Movable
-					      { .cluster = 1, .count = cores },
-					      // Page Cache
-					      { .cluster = 2, .count = cores },
-					      // Huge
-					      { .cluster = 3, .count = cores },
-				      } };
+	return (llfree_classing_t){ .num_classes = 4,
+				    .default_class = 3,
+				    .policy = llfree_linux_policy,
+				    .classes = {
+					    // Immovable
+					    { .class = 0, .count = cores },
+					    // Movable
+					    { .class = 1, .count = cores },
+					    // Page Cache
+					    { .class = 2, .count = cores },
+					    // Huge
+					    { .class = 3, .count = cores },
+				    } };
 }
 static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
 							  gfp_t flags)
@@ -190,27 +186,27 @@ static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
 
 // -----------------------------------------------------------------------------
 
-/// Create linux specific clustering.
-static inline llfree_clustering_t ll_unused llfree_clustering_linux(size_t cores)
+/// Create linux specific classing.
+static inline llfree_classing_t ll_unused llfree_class_config_linux(size_t cores)
 {
-	pr_info("init clustering level %u\n", llfree_clustering_level);
+	pr_info("init classing level %u\n", llfree_class_config);
 
-	if (llfree_clustering_level == 3)
-		return llfree_clustering_level_3(cores);
-	if (llfree_clustering_level == 2)
-		return llfree_clustering_level_2(cores);
-	if (llfree_clustering_level == 1)
-		return llfree_clustering_level_1(cores);
-	return llfree_clustering_level_0(cores);
+	if (llfree_class_config == 3)
+		return llfree_class_config_3(cores);
+	if (llfree_class_config == 2)
+		return llfree_class_config_2(cores);
+	if (llfree_class_config == 1)
+		return llfree_class_config_1(cores);
+	return llfree_class_config_0(cores);
 }
 
 llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags)
 {
-	if (llfree_clustering_level == 3)
+	if (llfree_class_config == 3)
 		return llfree_request_3(order, flags);
-	if (llfree_clustering_level == 2)
+	if (llfree_class_config == 2)
 		return llfree_request_2(order, flags);
-	if (llfree_clustering_level == 1)
+	if (llfree_class_config == 1)
 		return llfree_request_1(order, flags);
 	return llfree_request_0(order, flags);
 }
@@ -228,17 +224,16 @@ llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
-	llfree_clustering_t clustering =
-		llfree_clustering_linux(num_possible_cpus());
+	llfree_classing_t classing = llfree_class_config_linux(num_possible_cpus());
 
-	llfree_meta_size_t m = llfree_metadata_size(&clustering, pages);
+	llfree_meta_size_t m = llfree_metadata_size(&classing, pages);
 	llfree_meta_t meta = {
 		.local = memblock_alloc_node(m.local, LLFREE_CACHE_SIZE, node),
 		.trees = memblock_alloc_node(m.trees, LLFREE_CACHE_SIZE, node),
 		.lower = memblock_alloc_node(m.lower, LLFREE_CACHE_SIZE, node),
 	};
 	llfree_result_t res =
-		llfree_init(self, pages, LLFREE_INIT_ALLOC, meta, &clustering);
+		llfree_init(self, pages, LLFREE_INIT_ALLOC, meta, &classing);
 
 	BUG_ON(!llfree_is_ok(res));
 

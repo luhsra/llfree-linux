@@ -126,9 +126,9 @@ static inline llfree_classing_t ll_unused llfree_class_config_2(size_t cores)
 					    { .class = 0, .count = cores },
 					    // Movable
 					    { .class = 1, .count = cores },
-					    // Page Cache
+					    // Movable Zero
 					    { .class = 2, .count = cores },
-					    // Long
+					    // Page Cache
 					    { .class = 3, .count = cores },
 					    // Huge
 					    { .class = 4, .count = cores },
@@ -141,11 +141,10 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 	if (order >= LLFREE_HUGE_ORDER)
 		return llreq(order, 4, core);
 	if (flags & __GFP_MOVABLE) {
-		if (flags & ___GFP_PAGE_CACHE) {
-			if (flags & (__GFP_NORETRY | __GFP_NOFAIL))
-				return llreq(order, 3, core);
+		if (flags & ___GFP_PAGE_CACHE)
+			return llreq(order, 3, core);
+		if (flags & __GFP_ZERO)
 			return llreq(order, 2, core);
-		}
 		return llreq(order, 1, core);
 	}
 	return llreq(order, 0, core);
@@ -154,34 +153,42 @@ static inline llfree_request_t ll_unused llfree_request_2(uint8_t order,
 // -----------------------------------------------------------------------------
 static inline llfree_classing_t ll_unused llfree_class_config_3(size_t cores)
 {
-	return (llfree_classing_t){ .num_classes = 4,
-				    .default_class = 3,
+	return (llfree_classing_t){ .num_classes = 6,
+				    .default_class = 5,
 				    .policy = llfree_linux_policy,
 				    .classes = {
 					    // Immovable
 					    { .class = 0, .count = cores },
 					    // Movable
 					    { .class = 1, .count = cores },
-					    // Page Cache
+					    // Movable Zero
 					    { .class = 2, .count = cores },
-					    // Huge
+					    // Page Cache Write
 					    { .class = 3, .count = cores },
+					    // Page Cache
+					    { .class = 4, .count = cores },
+					    // Huge
+					    { .class = 5, .count = cores },
 				    } };
 }
 static inline llfree_request_t ll_unused llfree_request_3(uint8_t order,
 							  gfp_t flags)
 {
+	ll_optional_t core = ll_some(raw_smp_processor_id());
 	if (order >= LLFREE_HUGE_ORDER) {
-		ll_optional_t core = ll_some(raw_smp_processor_id());
-		return llreq(order, 3, core);
+		return llreq(order, 5, core);
 	}
-	ll_optional_t pid = ll_some(current->pid % num_possible_cpus());
 	if (flags & __GFP_MOVABLE) {
-		if (flags & ___GFP_PAGE_CACHE)
-			return llreq(order, 2, pid);
-		return llreq(order, 1, pid);
+		if (flags & ___GFP_PAGE_CACHE) {
+			if (flags & __GFP_WRITE)
+				return llreq(order, 3, core);
+			return llreq(order, 4, core);
+		}
+		if (flags & __GFP_ZERO)
+			return llreq(order, 2, core);
+		return llreq(order, 1, core);
 	}
-	return llreq(order, 0, pid);
+	return llreq(order, 0, core);
 }
 
 // -----------------------------------------------------------------------------
@@ -224,7 +231,8 @@ llfree_t *llfree_node_init(size_t node, size_t start_pfn, size_t pages)
 	llfree_t *self =
 		memblock_alloc_node(sizeof(llfree_t), LLFREE_CACHE_SIZE, node);
 
-	llfree_classing_t classing = llfree_class_config_linux(num_possible_cpus());
+	llfree_classing_t classing =
+		llfree_class_config_linux(num_possible_cpus());
 
 	llfree_meta_size_t m = llfree_metadata_size(&classing, pages);
 	llfree_meta_t meta = {

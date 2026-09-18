@@ -1,0 +1,19 @@
+#ifndef _LLFREE
+#define _LLFREE
+
+#ifdef CONFIG_LLFREE
+
+#include <linux/init.h>
+#include <llfree.h>
+
+/// Create a new allocator instance for the given node
+llfree_t *__init llfree_node_init(size_t node, size_t start_pfn, size_t pages);
+
+/// Create an allocator instance for each populated zone.
+void __init llfree_init_zones(void);
+
+/// Build a request for llfree, that implements the lifetime clustering policy.
+llfree_request_t llfree_linux_request(uint8_t order, gfp_t flags);
+
+#endif // CONFIG_LLFREE
+#endif // _LLFREE

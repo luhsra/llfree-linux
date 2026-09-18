@@ -28,6 +28,9 @@
 #include <linux/mm_inline.h>
 #include <linux/page_owner.h>
 #include <linux/sched/isolation.h>
+#ifdef CONFIG_LLFREE
+#include <llfree_alloc.h>
+#endif
 
 #include "internal.h"
 
@@ -337,6 +340,17 @@ void set_pgdat_percpu_threshold(pg_data_t *pgdat,
 	}
 }
 
+static __always_inline long zone_stat_threshold(struct zone *zone,
+		enum zone_stat_item item, long threshold)
+{
+#ifdef CONFIG_LLFREE
+	if (item == NR_FREE_PAGES && zone->llfree &&
+	    zone_managed_pages(zone) > 512 * 512)
+		threshold += 1024;
+#endif
+	return threshold;
+}
+
 /*
  * For use when we know that interrupts are disabled,
  * or when we know that preemption is disabled and that
@@ -346,7 +360,7 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 			   long delta)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	long x;
 	long t;
 
@@ -361,7 +375,8 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 
 	x = delta + __this_cpu_read(*p);
 
-	t = __this_cpu_read(pcp->stat_threshold);
+	t = zone_stat_threshold(zone, item,
+				__this_cpu_read(pcp->stat_threshold));
 
 	if (unlikely(abs(x) > t)) {
 		zone_page_state_add(x, zone, item);
@@ -435,16 +450,17 @@ EXPORT_SYMBOL(__mod_node_page_state);
 void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
-	s8 v, t;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
+	s16 v, t;
 
 	/* See __mod_node_page_state */
 	preempt_disable_nested();
 
 	v = __this_cpu_inc_return(*p);
-	t = __this_cpu_read(pcp->stat_threshold);
+	t = zone_stat_threshold(zone, item,
+				__this_cpu_read(pcp->stat_threshold));
 	if (unlikely(v > t)) {
-		s8 overstep = t >> 1;
+		s16 overstep = t >> 1;
 
 		zone_page_state_add(v + overstep, zone, item);
 		__this_cpu_write(*p, -overstep);
@@ -491,16 +507,17 @@ EXPORT_SYMBOL(__inc_node_page_state);
 void __dec_zone_state(struct zone *zone, enum zone_stat_item item)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
-	s8 v, t;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
+	s16 v, t;
 
 	/* See __mod_node_page_state */
 	preempt_disable_nested();
 
 	v = __this_cpu_dec_return(*p);
-	t = __this_cpu_read(pcp->stat_threshold);
-	if (unlikely(v < - t)) {
-		s8 overstep = t >> 1;
+	t = zone_stat_threshold(zone, item,
+				__this_cpu_read(pcp->stat_threshold));
+	if (unlikely(v < -t)) {
+		s16 overstep = t >> 1;
 
 		zone_page_state_add(v - overstep, zone, item);
 		__this_cpu_write(*p, overstep);
@@ -561,9 +578,9 @@ static inline void mod_zone_state(struct zone *zone,
        enum zone_stat_item item, long delta, int overstep_mode)
 {
 	struct per_cpu_zonestat __percpu *pcp = zone->per_cpu_zonestats;
-	s8 __percpu *p = pcp->vm_stat_diff + item;
+	s16 __percpu *p = pcp->vm_stat_diff + item;
 	long n, t, z;
-	s8 o;
+	s16 o;
 
 	o = this_cpu_read(*p);
 	do {
@@ -579,7 +596,8 @@ static inline void mod_zone_state(struct zone *zone,
 		 * Most of the time the thresholds are the same anyways
 		 * for all cpus in a zone.
 		 */
-		t = this_cpu_read(pcp->stat_threshold);
+		t = zone_stat_threshold(zone, item,
+					this_cpu_read(pcp->stat_threshold));
 
 		n = delta + (long)o;
 
@@ -1074,6 +1092,23 @@ static void fill_contig_page_info(struct zone *zone,
 				unsigned int suitable_order,
 				struct contig_page_info *info)
 {
+#ifdef CONFIG_LLFREE
+	ll_stats_t stats;
+
+	if (!zone->llfree) {
+		memset(info, 0, sizeof(*info));
+		return;
+	}
+
+	stats = llfree_stats(zone->llfree);
+	info->free_pages = stats.free_frames;
+	info->free_blocks_total = stats.free_frames;
+	if (suitable_order < LLFREE_HUGE_ORDER)
+		info->free_blocks_suitable = stats.free_frames >> suitable_order;
+	else
+		info->free_blocks_suitable = stats.free_huge >>
+			(suitable_order - LLFREE_HUGE_ORDER);
+#else
 	unsigned int order;
 
 	info->free_pages = 0;
@@ -1098,8 +1133,9 @@ static void fill_contig_page_info(struct zone *zone,
 		/* Count the suitable free blocks */
 		if (order >= suitable_order)
 			info->free_blocks_suitable += blocks <<
-						(order - suitable_order);
+							(order - suitable_order);
 	}
+#endif
 }
 
 /*
@@ -1560,12 +1596,33 @@ static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 	int order;
 
 	seq_printf(m, "Node %d, zone %8s ", pgdat->node_id, zone->name);
+#ifdef CONFIG_LLFREE
+	if (zone->llfree) {
+		ll_stats_t stats = llfree_stats(zone->llfree);
+		unsigned long free_huge = stats.free_huge;
+		unsigned long free_small = stats.free_frames -
+			(free_huge << LLFREE_HUGE_ORDER);
+
+		for (order = 0; order < NR_PAGE_ORDERS; ++order) {
+			if (order == 0)
+				seq_printf(m, "%6lu ", free_small);
+			else if (order == LLFREE_HUGE_ORDER)
+				seq_printf(m, "%6lu ", free_huge);
+			else
+				seq_puts(m, "     0 ");
+		}
+	} else {
+		for (order = 0; order < NR_PAGE_ORDERS; ++order)
+			seq_puts(m, "     0 ");
+	}
+#else
 	for (order = 0; order < NR_PAGE_ORDERS; ++order)
 		/*
 		 * Access to nr_free is lockless as nr_free is used only for
 		 * printing purposes. Use data_race to avoid KCSAN warning.
 		 */
 		seq_printf(m, "%6lu ", data_race(zone->free_area[order].nr_free));
+#endif
 	seq_putc(m, '\n');
 }
 

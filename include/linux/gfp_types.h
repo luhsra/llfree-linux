@@ -58,6 +58,9 @@ enum {
 #ifdef CONFIG_SLAB_OBJ_EXT
 	___GFP_NO_OBJ_EXT_BIT,
 #endif
+#ifdef CONFIG_LLFREE_PAGE_CACHE
+	___GFP_PAGE_CACHE_BIT,
+#endif
 	___GFP_LAST_BIT
 };
 
@@ -102,6 +105,11 @@ enum {
 #define ___GFP_NO_OBJ_EXT       BIT(___GFP_NO_OBJ_EXT_BIT)
 #else
 #define ___GFP_NO_OBJ_EXT       0
+#endif
+#ifdef CONFIG_LLFREE_PAGE_CACHE
+#define ___GFP_PAGE_CACHE	BIT(___GFP_PAGE_CACHE_BIT)
+#else
+#define ___GFP_PAGE_CACHE	0
 #endif
 
 /*

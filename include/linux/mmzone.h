@@ -759,9 +759,11 @@ struct per_cpu_pages {
 	struct list_head lists[NR_PCP_LISTS];
 } ____cacheline_aligned_in_smp;
 
+struct llfree;
+
 struct per_cpu_zonestat {
 #ifdef CONFIG_SMP
-	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
+	s16 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
 	s8 stat_threshold;
 #endif
 #ifdef CONFIG_NUMA
@@ -903,6 +905,9 @@ struct zone {
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
+#ifdef CONFIG_LLFREE
+	struct llfree		*llfree;
+#endif
 	/*
 	 * the high and batch values are copied to individual pagesets for
 	 * faster access

@@ -1012,12 +1012,14 @@ struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 		do {
 			cpuset_mems_cookie = read_mems_allowed_begin();
 			n = cpuset_mem_spread_node();
-			folio = __folio_alloc_node_noprof(gfp, order, n);
+			folio = __folio_alloc_node_noprof(
+				gfp | (__force gfp_t)___GFP_PAGE_CACHE, order, n);
 		} while (!folio && read_mems_allowed_retry(cpuset_mems_cookie));
 
 		return folio;
 	}
-	return folio_alloc_noprof(gfp, order);
+	return folio_alloc_noprof(gfp | (__force gfp_t)___GFP_PAGE_CACHE,
+				 order);
 }
 EXPORT_SYMBOL(filemap_alloc_folio_noprof);
 #endif

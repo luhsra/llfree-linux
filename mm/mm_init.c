@@ -15,6 +15,9 @@
 #include <linux/sched.h>
 #include <linux/mman.h>
 #include <linux/memblock.h>
+#ifdef CONFIG_LLFREE
+#include <llfree_alloc.h>
+#endif
 #include <linux/page-isolation.h>
 #include <linux/padata.h>
 #include <linux/nmi.h>
@@ -2703,6 +2706,9 @@ void __init mm_core_init(void)
 	 */
 	kho_memory_init();
 
+#ifdef CONFIG_LLFREE
+	llfree_init_zones();
+#endif
 	memblock_free_all();
 	mem_init();
 	kmem_cache_init();

@@ -59,6 +59,9 @@
 #include "internal.h"
 #include "shuffle.h"
 #include "page_reporting.h"
+#ifdef CONFIG_LLFREE
+#include <llfree_alloc.h>
+#endif
 
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -801,6 +804,58 @@ static inline void account_freepages(struct zone *zone, int nr_pages,
 			   zone->nr_free_highatomic + nr_pages);
 }
 
+#ifdef CONFIG_LLFREE
+static void llfree_mod_freepage_state(struct zone *zone, long nr_pages,
+				      int migratetype)
+{
+	if (is_migrate_isolate(migratetype))
+		return;
+
+	__mod_zone_page_state(zone, NR_FREE_PAGES, nr_pages);
+	if (is_migrate_cma(migratetype))
+		__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, nr_pages);
+}
+
+static void llfree_free_page(struct page *page, unsigned int order,
+			     fpi_t fpi_flags)
+{
+	struct zone *zone = page_zone(page);
+	unsigned long base = ALIGN_DOWN(zone->zone_start_pfn,
+					LLFREE_ALIGN >> PAGE_SHIFT);
+	unsigned long pfn = page_to_pfn(page);
+	int migratetype = get_pfnblock_migratetype(page, pfn);
+	llfree_result_t result;
+
+	VM_BUG_ON_PAGE(!zone->llfree, page);
+	VM_BUG_ON_PAGE(pfn < base, page);
+
+	if (is_migrate_isolate(migratetype))
+		return;
+
+	if (compaction_capture(task_capc(zone), page, order, migratetype))
+		return;
+
+	pcpu_task_pin();
+	result = llfree_put(zone->llfree, frame_id(pfn - base),
+			    llfree_linux_request(order,
+				migratetype == MIGRATE_MOVABLE ? __GFP_MOVABLE : 0));
+	if (likely(llfree_is_ok(result))) {
+		llfree_mod_freepage_state(zone, 1 << order, migratetype);
+		__count_vm_events(PGFREE, 1 << order);
+	}
+	pcpu_task_unpin();
+
+	if (unlikely(!llfree_is_ok(result))) {
+		pr_err("llfree: free failed with error %u\n", result.error);
+		VM_BUG_ON_PAGE(true, page);
+		return;
+	}
+
+	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
+		page_reporting_notify_free(order);
+}
+#endif
+
 /* Used for pages not on another list */
 static inline void __add_to_free_list(struct page *page, struct zone *zone,
 				      unsigned int order, int migratetype,
@@ -1516,6 +1571,7 @@ static void split_large_buddy(struct zone *zone, struct page *page,
 	} while (1);
 }
 
+#ifndef CONFIG_LLFREE
 static void add_page_to_zone_llist(struct zone *zone, struct page *page,
 				   unsigned int order)
 {
@@ -1560,15 +1616,19 @@ static void free_one_page(struct zone *zone, struct page *page,
 
 	__count_vm_events(PGFREE, 1 << order);
 }
+#endif
 
 static void __free_pages_ok(struct page *page, unsigned int order,
 			    fpi_t fpi_flags)
 {
-	unsigned long pfn = page_to_pfn(page);
-	struct zone *zone = page_zone(page);
+	if (!free_pages_prepare(page, order))
+		return;
 
-	if (free_pages_prepare(page, order))
-		free_one_page(zone, page, pfn, order, fpi_flags);
+#ifdef CONFIG_LLFREE
+	llfree_free_page(page, order, fpi_flags);
+#else
+	free_one_page(page_zone(page), page, page_to_pfn(page), order, fpi_flags);
+#endif
 }
 
 void __meminit __free_pages_core(struct page *page, unsigned int order,
@@ -2590,6 +2650,11 @@ int decay_pcp_high(struct zone *zone, struct per_cpu_pages *pcp)
  */
 void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 {
+#ifdef CONFIG_LLFREE
+	if (zone->llfree)
+		llfree_drain(zone->llfree);
+	return;
+#else
 	int to_drain, batch;
 
 	batch = READ_ONCE(pcp->batch);
@@ -2599,6 +2664,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
 		free_pcppages_bulk(zone, to_drain, pcp, 0);
 		spin_unlock(&pcp->lock);
 	}
+#endif
 }
 #endif
 
@@ -2607,6 +2673,10 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
  */
 static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 {
+#ifdef CONFIG_LLFREE
+	if (zone->llfree)
+		llfree_drain(zone->llfree);
+#else
 	struct per_cpu_pages *pcp = per_cpu_ptr(zone->per_cpu_pageset, cpu);
 	int count;
 
@@ -2622,6 +2692,7 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 		}
 		spin_unlock(&pcp->lock);
 	} while (count);
+#endif
 }
 
 /*
@@ -2734,9 +2805,23 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
  */
 void drain_all_pages(struct zone *zone)
 {
+#ifdef CONFIG_LLFREE
+	struct zone *z;
+
+	if (zone) {
+		if (zone->llfree)
+			llfree_drain(zone->llfree);
+		return;
+	}
+	for_each_populated_zone(z)
+		if (z->llfree)
+			llfree_drain(z->llfree);
+#else
 	__drain_all_pages(zone, false);
+#endif
 }
 
+#ifndef CONFIG_LLFREE
 static int nr_pcp_free(struct per_cpu_pages *pcp, int batch, int high, bool free_high)
 {
 	int min_nr_free, max_nr_free;
@@ -2880,6 +2965,7 @@ static void free_frozen_page_commit(struct zone *zone,
 			atomic_set(&pgdat->kswapd_failures, 0);
 	}
 }
+#endif
 
 /*
  * Free a pcp page
@@ -2887,6 +2973,9 @@ static void free_frozen_page_commit(struct zone *zone,
 static void __free_frozen_pages(struct page *page, unsigned int order,
 				fpi_t fpi_flags)
 {
+#ifdef CONFIG_LLFREE
+	__free_pages_ok(page, order, fpi_flags);
+#else
 	unsigned long __maybe_unused UP_flags;
 	struct per_cpu_pages *pcp;
 	struct zone *zone;
@@ -2932,6 +3021,7 @@ static void __free_frozen_pages(struct page *page, unsigned int order,
 		free_one_page(zone, page, pfn, order, fpi_flags);
 	}
 	pcp_trylock_finish(UP_flags);
+#endif
 }
 
 void free_frozen_pages(struct page *page, unsigned int order)
@@ -2944,6 +3034,14 @@ void free_frozen_pages(struct page *page, unsigned int order)
  */
 void free_unref_folios(struct folio_batch *folios)
 {
+#ifdef CONFIG_LLFREE
+	for (size_t i = 0; i < folios->nr; i++) {
+		struct folio *folio = folios->folios[i];
+
+		__free_pages_ok(&folio->page, folio_order(folio), FPI_NONE);
+	}
+	folio_batch_reinit(folios);
+#else
 	unsigned long __maybe_unused UP_flags;
 	struct per_cpu_pages *pcp = NULL;
 	struct zone *locked_zone = NULL;
@@ -3035,6 +3133,7 @@ void free_unref_folios(struct folio_batch *folios)
 		pcp_trylock_finish(UP_flags);
 	}
 	folio_batch_reinit(folios);
+#endif
 }
 
 /*
@@ -3276,6 +3375,7 @@ struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 	return page;
 }
 
+#ifndef CONFIG_LLFREE
 /* Lock and remove page from the per-cpu list */
 static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
@@ -3310,6 +3410,7 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	}
 	return page;
 }
+#endif
 
 /*
  * Allocate a page from the given zone.
@@ -3331,6 +3432,26 @@ struct page *rmqueue(struct zone *preferred_zone,
 {
 	struct page *page;
 
+#ifdef CONFIG_LLFREE
+	llfree_result_t result;
+	unsigned long base;
+
+	pcpu_task_pin();
+	result = llfree_get(zone->llfree, frame_id_none(),
+			    llfree_linux_request(order, gfp_flags));
+	if (unlikely(!llfree_is_ok(result))) {
+		BUG_ON(result.error != LLFREE_ERR_MEMORY);
+		page = NULL;
+	} else {
+		base = ALIGN_DOWN(zone->zone_start_pfn,
+				  LLFREE_ALIGN >> PAGE_SHIFT);
+		page = pfn_to_page(base + result.frame.value);
+		llfree_mod_freepage_state(zone, -(1 << order), migratetype);
+		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
+		zone_statistics(preferred_zone, zone, 1);
+	}
+	pcpu_task_unpin();
+#else
 	if (likely(pcp_allowed_order(order))) {
 		page = rmqueue_pcplist(preferred_zone, zone, order,
 				       migratetype, alloc_flags);
@@ -3339,9 +3460,12 @@ struct page *rmqueue(struct zone *preferred_zone,
 	}
 
 	page = rmqueue_buddy(preferred_zone, zone, order, alloc_flags,
-							migratetype);
+						migratetype);
+#endif
 
+#ifndef CONFIG_LLFREE
 out:
+#endif
 	/* Separate test+clear to avoid unnecessary atomics */
 	if ((alloc_flags & ALLOC_KSWAPD) &&
 	    unlikely(test_bit(ZONE_BOOSTED_WATERMARK, &zone->flags))) {
@@ -3353,6 +3477,7 @@ out:
 	return page;
 }
 
+#ifndef CONFIG_LLFREE
 /*
  * Reserve the pageblock(s) surrounding an allocation request for
  * exclusive use of high-order atomic allocations if there are no
@@ -3400,6 +3525,7 @@ static void reserve_highatomic_pageblock(struct page *page, int order,
 out_unlock:
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
+#endif
 
 /*
  * Used when an allocation is about to fail under memory pressure. This
@@ -3521,7 +3647,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 			 long free_pages)
 {
 	long min = mark;
-	int o;
+	int o __maybe_unused;
 
 	/* free_pages may go negative - that's OK */
 	free_pages -= __zone_watermark_unusable_free(z, order, alloc_flags);
@@ -3567,6 +3693,10 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 	if (!order)
 		return true;
 
+#ifdef CONFIG_LLFREE
+	/* Querying LLFree would cost about as much as trying the allocation. */
+	return true;
+#else
 	/* For a high-order request, check at least one suitable page is free */
 	for (o = order; o < NR_PAGE_ORDERS; o++) {
 		struct free_area *area = &z->free_area[o];
@@ -3592,6 +3722,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		}
 	}
 	return false;
+#endif
 }
 
 bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
@@ -3878,12 +4009,14 @@ try_this_zone:
 		if (page) {
 			prep_new_page(page, order, gfp_mask, alloc_flags);
 
+#ifndef CONFIG_LLFREE
 			/*
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
 			if (unlikely(alloc_flags & ALLOC_HIGHATOMIC))
 				reserve_highatomic_pageblock(page, order, zone);
+#endif
 
 			return page;
 		} else {
@@ -4989,6 +5122,25 @@ unsigned long alloc_pages_bulk_noprof(gfp_t gfp, int preferred_nid,
 			nodemask_t *nodemask, int nr_pages,
 			struct page **page_array)
 {
+#ifdef CONFIG_LLFREE
+	int nr_populated = 0;
+
+	while (nr_populated < nr_pages) {
+		struct page *page;
+
+		if (page_array[nr_populated]) {
+			nr_populated++;
+			continue;
+		}
+
+		page = __alloc_pages_noprof(gfp, 0, preferred_nid, nodemask);
+		if (!page)
+			break;
+		page_array[nr_populated++] = page;
+	}
+
+	return nr_populated;
+#else
 	struct page *page;
 	unsigned long __maybe_unused UP_flags;
 	struct zone *zone;
@@ -5133,6 +5285,7 @@ failed:
 	if (page)
 		page_array[nr_populated++] = page;
 	goto out;
+#endif
 }
 EXPORT_SYMBOL_GPL(alloc_pages_bulk_noprof);
 
